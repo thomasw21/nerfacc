@@ -162,7 +162,7 @@ def generate_sensors(
         # + torch.tensor([0.5, 0.5, 0.5], device=angles.device, dtype=angles.dtype) # origin of the bounding box is 0
 
     # Camera specific values
-    camera_angle_x = 45
+    camera_angle_x = 45 * np.pi / 180
     ratio = image_width / image_height # make sure that the pixels are actually square
     focal_x = 0.5 * image_height / np.tan(0.5 * camera_angle_x)
     focal_y = focal_x * ratio
@@ -255,11 +255,9 @@ def render_images(
     pixel_position_in_camera = torch.stack([
         x,
         y,
-        camera_intrinsics[0, 0][None, None].expand(image_height, image_height)
-    ], dim=-1) # [H, W, 3]
-    # TODO @thomasw21: determine if I should run contiguous here
-    camera_rotations_inv = camera_rotations.permute(0,2,1)
-    directions = (camera_rotations_inv[:, None, :, :] @ pixel_position_in_camera.view(1, image_height * image_width, 3, 1)).squeeze(-1) # [N, H, W, 3]
+        - camera_intrinsics[0, 0][None, None].expand(image_height, image_height)
+    ], dim=-1) / camera_intrinsics[0,0] # [H, W, 3]
+    directions = (camera_rotations[:, None, :, :] @ pixel_position_in_camera.view(1, image_height * image_width, 3, 1)).squeeze(-1) # [N, H, W, 3]
     # pixel_position_in_world = directions + C[:, None, None, :]
     view_dirs = (directions / torch.linalg.norm(directions, dim=-1)[..., None]).view(-1, 3) # [N, H, W, 3]
     # TODO @thomasw21: Figure out a way without copying data
@@ -270,13 +268,13 @@ def render_images(
     # packed_info: (n_rays, 2). t_starts: (n_samples, 1). t_ends: (n_samples, 1).
     with torch.no_grad():
         packed_info, t_starts, t_ends = nerfacc.ray_marching(
-            origins,
-            view_dirs,
+            rays_o=origins,
+            rays_d=view_dirs,
             sigma_fn=get_sigma_fn(query_density, rays_o=origins, rays_d=view_dirs),
-            # scene_aabb=args.scene_aabb # TODO @thomasw21: Need to pass it down otherwise this is going to be hell
-            grid=occupancy_grid,
-            near_plane=0.2,
-            far_plane=1.0,
+            scene_aabb=occupancy_grid.roi_aabb # TODO @thomasw21: Need to pass it down otherwise this is going to be hell
+            grid=occupancy_grid, # This is fucked
+            # near_plane=0.2,
+            # far_plane=1.0,
             early_stop_eps=1e-4,
             alpha_thre=1e-2,
         )
@@ -382,7 +380,8 @@ def main():
             # TODO @thomasw21: we're not using their official API, though I'm more than okay with this
             occupancy_grid._update(
                 step=it,
-                occ_eval_fn=lambda x: radiance_field.query_density(x) * args.grid_resolution,
+                # TODO @thomasw21: figure out what the correct step_size we use.
+                occ_eval_fn=lambda x: radiance_field.query_density(x) * 1e-2,
                 occ_thre=0.01, # at which point we consider, it proposes a weird binary thing where you're higher than the mean clamped with this threshold
                 ema_decay=0.95, # exponential decay in order to create some sort of inertia
                 warmup_steps=256, # after which we sample randomly the grid for some values
