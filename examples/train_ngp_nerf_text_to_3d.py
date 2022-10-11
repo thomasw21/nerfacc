@@ -113,11 +113,11 @@ class ViewDependentPrompter:
     def get_all_text_prompts(self) -> List[str]:
         return [self.get_prompt(suffix) for suffix in self.suffixes]
 
-def generate_random_360_angles(num_angles: int, stochastic_angles: bool = True) -> torch.Tensor:
+def generate_random_360_angles(num_angles: int, device: torch.device, stochastic_angles: bool = True) -> torch.Tensor:
     if stochastic_angles:
-        return torch.rand(num_angles) * 360.0
+        return torch.rand(num_angles, device=device) * 360.0
     else:
-        return torch.arange(num_angles) * (360.0 / num_angles)
+        return torch.arange(num_angles, device=device) * (360.0 / num_angles)
 
 Sensors = Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
 def generate_sensors(
@@ -253,11 +253,11 @@ def render_images(
     pixel_position_in_camera = torch.stack([
         x,
         y,
-        camera_intrinsics[0, 0][None, None, None]
+        camera_intrinsics[0, 0][None, None].expand(image_height, image_height)
     ], dim=-1) # [H, W, 3]
     # TODO @thomasw21: determine if I should run contiguous here
     camera_rotations_inv = camera_rotations.permute(0,2,1)
-    directions = (camera_rotations_inv[:, None, :, :] @ pixel_position_in_camera.view(1, image_height * image_width, 1, 3)).unsqueeze(-2) # [N, H, W, 3]
+    directions = (camera_rotations_inv[:, None, :, :] @ pixel_position_in_camera.view(1, image_height * image_width, 3, 1)).unsqueeze(-2) # [N, H, W, 3]
     # pixel_position_in_world = directions + C[:, None, None, :]
     view_dirs = directions / torch.linalg.norm(directions, dim=-1)[..., None].view(-1, 3) # [N, H, W, 3]
     # TODO @thomasw21: Figure out a way without copying data
@@ -338,7 +338,7 @@ def main():
         # generate a random camera view
         image_height, image_width = text_image_discriminator.image_height_width
 
-        angles = generate_random_360_angles(num_angles=args.batch_size)
+        angles = generate_random_360_angles(num_angles=args.batch_size, device=device)
 
         # Generate a view dependent prompt
         encoded_texts = torch.stack([
