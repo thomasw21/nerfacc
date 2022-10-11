@@ -287,7 +287,7 @@ def render_images(
         t_ends=t_ends
     )
 
-    return color.view(N, image_height, image_width, 3), opacity.view(N, image_height, image_width, 3)
+    return color.view(N, image_height, image_width, 3), opacity.view(N, image_height, image_width, 1)
 
 
 def main():
