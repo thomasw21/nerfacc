@@ -16,16 +16,23 @@ from radiance_fields.ngp import NGPradianceField
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--text", type=str, required=True, help="Text to fit")
+
+    ###
     parser.add_argument(
         "--aabb",
         type=lambda s: [float(item) for item in s.split(",")],
         default="-0.5,-0.5,-0.5,0.5,0.5,0.5",
         help="delimited list input",
     )
+    parser.add_argument("--unbounded", action="store_true", help="whether to use unbounded rendering")
     parser.add_argument("--update-occupancy-grid-interval", type=int, default=16, help="Update occupancy grid every n steps")
+
+    ### Optimizer
     parser.add_argument("--learning-rate", type=int, default=1e-2, help="Learning rate")
     parser.add_argument("--iterations", type=int, default=2000, help="Number of optimizer steps")
     parser.add_argument("--batch-size", type=int, default=32, help="Number of camera views within a single batch")
+
+    ### Logging
     parser.add_argument("--log-interval", type=int, default=10, help="Log every n steps")
 
     args = parser.parse_args()
