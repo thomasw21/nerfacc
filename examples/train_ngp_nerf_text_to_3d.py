@@ -358,6 +358,7 @@ def main():
         )
 
         # Discriminate images with text
+        images = images.permute(0, 3, 1, 2) # [B, H, W, C] -> [B, C, H, W]
         encoded_images = text_image_discriminator.encode_images(images, encoded_texts=encoded_texts)
         scores = text_image_discriminator(encoded_images=encoded_images, encoded_texts=encoded_texts)
         cosine_loss = - scores.mean()
