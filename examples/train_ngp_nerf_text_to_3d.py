@@ -115,7 +115,7 @@ class ViewDependentPrompter:
 
 def generate_random_360_angles(num_angles: int, stochastic_angles: bool = True) -> torch.Tensor:
     if stochastic_angles:
-        return torch.random.random(num_angles) * 360.0
+        return torch.rand(num_angles) * 360.0
     else:
         return torch.arange(num_angles) * (360.0 / num_angles)
 
@@ -125,12 +125,12 @@ def generate_sensors(
     image_width: int,
     angles: torch.Tensor
 ) -> Sensors:
-    N, _ = angles.shape
+    N, = angles.shape
 
     # Angle from equator, 30 degrees from equator
     theta = (90 - 30) * np.pi / 180
     # Rotate according to y-axis
-    rot_theta = torch.Tensor(
+    rot_theta = torch.tensor(
         [
             [np.cos(theta), 0, np.sin(theta)],
             [0, 1, 0],
@@ -156,15 +156,15 @@ def generate_sensors(
     # Origins
     radius = 2
     origins = \
-        rotations @ torch.Tensor([0, 0, radius], device=angles.device, dtype=angles.dtype) \
-        + torch.Tensor([0.5, 0.5, 0.5], device=angles.device, dtype=angles.dtype) # origin of the bounding box is 0
+        rotations @ torch.tensor([0, 0, radius], device=angles.device, dtype=angles.dtype) \
+        + torch.tensor([0.5, 0.5, 0.5], device=angles.device, dtype=angles.dtype) # origin of the bounding box is 0
 
     # Camera specific values
     camera_angle_x = 45
     ratio = image_width / image_height # make sure that the pixels are actually square
     focal_x = 0.5 * image_height / np.tan(0.5 * camera_angle_x)
     focal_y = focal_x * ratio
-    K = torch.Tensor(
+    K = torch.tensor(
         [
             [focal_x, 0, image_width * 0.5, 0],
             [0, focal_y, image_height * 0.5, 0],
