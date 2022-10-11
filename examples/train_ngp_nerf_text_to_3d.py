@@ -197,7 +197,7 @@ def get_sigma_fn(
         """
         t_origins = rays_o[ray_indices]  # (n_samples, 3)
         t_dirs = rays_d[ray_indices]  # (n_samples, 3)
-        # TODO @thomasw21: Sample a lot more position than this
+        # This essentially compute the mean position, we might instead jitter and randomly sample for robustness
         positions = t_origins + t_dirs * (t_starts + t_ends) / 2.0
         sigmas = query_density(positions)
         return sigmas  # (n_samples, 1)
@@ -222,9 +222,9 @@ def get_rgb_sigma_fn(
         """
         t_origins = rays_o[ray_indices]  # (n_samples, 3)
         t_dirs = rays_d[ray_indices]  # (n_samples, 3)
-        # TODO @thomasw21: Sample a lot more position than this
+        # This essentially compute the mean position, we might instead jitter and randomly sample for robustness
         positions = t_origins + t_dirs * (t_starts + t_ends) / 2.0
-        rgbs, sigmas = radiance_field(positions, condition=t_dirs)
+        rgbs, sigmas = radiance_field(positions, t_dirs)
         return rgbs, sigmas  # (n_samples, 3), (n_samples, 1)
     return rgb_sigma_fn
 
@@ -259,7 +259,7 @@ def render_images(
     camera_rotations_inv = camera_rotations.permute(0,2,1)
     directions = (camera_rotations_inv[:, None, :, :] @ pixel_position_in_camera.view(1, image_height * image_width, 3, 1)).unsqueeze(-2) # [N, H, W, 3]
     # pixel_position_in_world = directions + C[:, None, None, :]
-    view_dirs = directions / torch.linalg.norm(directions, dim=-1)[..., None].view(-1, 3) # [N, H, W, 3]
+    view_dirs = (directions / torch.linalg.norm(directions, dim=-1)[..., None]).view(-1, 3) # [N, H, W, 3]
     # TODO @thomasw21: Figure out a way without copying data
     origins = torch.repeat_interleave(camera_centers, image_height * image_height, dim=0)
 
