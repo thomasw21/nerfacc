@@ -348,7 +348,14 @@ def main():
 
         # Render image
         sensors = generate_sensors(image_height=image_height, image_width=image_width, angles=angles)
-        images, opacities = render_images(radiance_field, query_density=radiance_field.query_density, occupancy_grid=occupancy_grid, sensors=sensors)
+        images, opacities = render_images(
+            radiance_field,
+            query_density=radiance_field.query_density,
+            occupancy_grid=occupancy_grid,
+            image_height=image_height,
+            image_width=image_width,
+            sensors=sensors
+        )
 
         # Discriminate images with text
         encoded_images = text_image_discriminator.encode_images(images, encoded_texts=encoded_texts)
