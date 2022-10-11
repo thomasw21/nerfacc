@@ -271,7 +271,7 @@ def render_images(
             rays_o=origins,
             rays_d=view_dirs,
             sigma_fn=get_sigma_fn(query_density, rays_o=origins, rays_d=view_dirs),
-            scene_aabb=occupancy_grid.roi_aabb # TODO @thomasw21: Need to pass it down otherwise this is going to be hell
+            scene_aabb=occupancy_grid.roi_aabb, # TODO @thomasw21: Need to pass it down otherwise this is going to be hell
             grid=occupancy_grid, # This is fucked
             # near_plane=0.2,
             # far_plane=1.0,
