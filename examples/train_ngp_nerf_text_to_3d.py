@@ -113,6 +113,7 @@ class ViewDependentPrompter:
     def get_all_text_prompts(self) -> List[str]:
         return [self.get_prompt(suffix) for suffix in self.suffixes]
 
+@torch.no_grad()
 def generate_random_360_angles(num_angles: int, device: torch.device, stochastic_angles: bool = True) -> torch.Tensor:
     if stochastic_angles:
         return torch.rand(num_angles, device=device) * 360.0
@@ -120,6 +121,7 @@ def generate_random_360_angles(num_angles: int, device: torch.device, stochastic
         return torch.arange(num_angles, device=device) * (360.0 / num_angles)
 
 Sensors = Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+@torch.no_grad()
 def generate_sensors(
     image_height: int,
     image_width: int,
@@ -140,15 +142,15 @@ def generate_sensors(
         dtype=angles.dtype
     ) # [3, 3]
 
-    sin_angles = torch.sin(angles) # [N,]
-    cos_angles = torch.cos(angles) # [N,]
+    sin_angles = torch.sin(angles * np.pi / 180) # [N,]
+    cos_angles = torch.cos(angles * np.pi / 180) # [N,]
 
     # Rotate according to z-axis
     rot_phi = torch.zeros(N, 3, 3, device=angles.device, dtype=angles.dtype)
     rot_phi[:, -1, -1] = 1
     rot_phi[:, 0, 0] = cos_angles
-    rot_phi[:, 1, 0] = -sin_angles
-    rot_phi[:, 0, 1] = sin_angles
+    rot_phi[:, 1, 0] = sin_angles
+    rot_phi[:, 0, 1] = -sin_angles
     rot_phi[:, 1, 1] = cos_angles
 
     rotations = rot_phi @ rot_theta
@@ -156,8 +158,8 @@ def generate_sensors(
     # Origins
     radius = 2
     origins = \
-        rotations @ torch.tensor([0, 0, radius], device=angles.device, dtype=angles.dtype) \
-        + torch.tensor([0.5, 0.5, 0.5], device=angles.device, dtype=angles.dtype) # origin of the bounding box is 0
+        rotations @ torch.tensor([0, 0, radius], device=angles.device, dtype=angles.dtype)
+        # + torch.tensor([0.5, 0.5, 0.5], device=angles.device, dtype=angles.dtype) # origin of the bounding box is 0
 
     # Camera specific values
     camera_angle_x = 45
@@ -257,7 +259,7 @@ def render_images(
     ], dim=-1) # [H, W, 3]
     # TODO @thomasw21: determine if I should run contiguous here
     camera_rotations_inv = camera_rotations.permute(0,2,1)
-    directions = (camera_rotations_inv[:, None, :, :] @ pixel_position_in_camera.view(1, image_height * image_width, 3, 1)).unsqueeze(-2) # [N, H, W, 3]
+    directions = (camera_rotations_inv[:, None, :, :] @ pixel_position_in_camera.view(1, image_height * image_width, 3, 1)).squeeze(-1) # [N, H, W, 3]
     # pixel_position_in_world = directions + C[:, None, None, :]
     view_dirs = (directions / torch.linalg.norm(directions, dim=-1)[..., None]).view(-1, 3) # [N, H, W, 3]
     # TODO @thomasw21: Figure out a way without copying data
@@ -266,17 +268,18 @@ def render_images(
     #### From nerfacc README:
     # Efficient Raymarching: Skip empty and occluded space, pack samples from all rays.
     # packed_info: (n_rays, 2). t_starts: (n_samples, 1). t_ends: (n_samples, 1).
-    packed_info, t_starts, t_ends = nerfacc.ray_marching(
-        origins,
-        view_dirs,
-        sigma_fn=get_sigma_fn(query_density, rays_o=origins, rays_d=view_dirs),
-        # scene_aabb=args.scene_aabb # TODO @thomasw21: Need to pass it down otherwise this is going to be hell
-        grid=occupancy_grid,
-        near_plane=0.2,
-        far_plane=1.0,
-        early_stop_eps=1e-4,
-        alpha_thre=1e-2,
-    )
+    with torch.no_grad():
+        packed_info, t_starts, t_ends = nerfacc.ray_marching(
+            origins,
+            view_dirs,
+            sigma_fn=get_sigma_fn(query_density, rays_o=origins, rays_d=view_dirs),
+            # scene_aabb=args.scene_aabb # TODO @thomasw21: Need to pass it down otherwise this is going to be hell
+            grid=occupancy_grid,
+            near_plane=0.2,
+            far_plane=1.0,
+            early_stop_eps=1e-4,
+            alpha_thre=1e-2,
+        )
 
     # Differentiable Volumetric Rendering.
     # colors: (n_rays, 3). opacity: (n_rays, 1). depth: (n_rays, 1).
@@ -294,9 +297,9 @@ def main():
     args = get_args()
 
     if torch.cuda.is_available():
-        device = "cuda"
+        device = torch.device("cuda")
     else:
-        device = "cpu"
+        device = torch.device("cpu")
 
     # Setup neural network blocks
     radiance_field = NGPradianceField(
@@ -308,7 +311,7 @@ def main():
         radiance_field.parameters(), lr=args.learning_rate
     )
 
-    text_image_discriminator = TextImageDiscriminator()
+    text_image_discriminator = TextImageDiscriminator().to(device)
     # Freeze all CLIP weights.
     text_image_discriminator.eval()
     for name, params in text_image_discriminator.named_parameters():
@@ -330,7 +333,6 @@ def main():
         }
 
     # training
-    tic = time.time()
     for it in tqdm(range(args.iterations)):
         # Set radiance field to trainable
         radiance_field.train()
