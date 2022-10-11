@@ -346,6 +346,20 @@ def main():
             for angle in angles]
         )
 
+        # Update sparse occupancy matrix every n steps
+        # Essentially there's a bunch of values that I don't care about since I can just set them to zero once and for all
+        if it % args.update_occupancy_grid_interval == 0:
+            # TODO @thomasw21: we're not using their official API, though I'm more than okay with this
+            occupancy_grid._update(
+                step=it,
+                # TODO @thomasw21: figure out what the correct step_size we use.
+                occ_eval_fn=lambda x: radiance_field.query_density(x) * 1e-2,
+                occ_thre=0.01,
+                # at which point we consider, it proposes a weird binary thing where you're higher than the mean clamped with this threshold
+                ema_decay=0.95,  # exponential decay in order to create some sort of inertia
+                warmup_steps=256,  # after which we sample randomly the grid for some values
+            )
+
         # Render image
         sensors = generate_sensors(image_height=image_height, image_width=image_width, angles=angles)
         images, opacities = render_images(
@@ -373,19 +387,6 @@ def main():
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-
-        # Update sparse occupancy matrix every n steps
-        # Essentially there's a bunch of values that I don't care about since I can just set them to zero once and for all
-        if it % args.update_occupancy_grid_interval == 0:
-            # TODO @thomasw21: we're not using their official API, though I'm more than okay with this
-            occupancy_grid._update(
-                step=it,
-                # TODO @thomasw21: figure out what the correct step_size we use.
-                occ_eval_fn=lambda x: radiance_field.query_density(x) * 1e-2,
-                occ_thre=0.01, # at which point we consider, it proposes a weird binary thing where you're higher than the mean clamped with this threshold
-                ema_decay=0.95, # exponential decay in order to create some sort of inertia
-                warmup_steps=256, # after which we sample randomly the grid for some values
-            )
 
         # Log loss
         if it % args.log_interval == 0:
