@@ -33,7 +33,7 @@ def get_args():
     ### Optimizer
     # See DreamFields paper
     parser.add_argument("--lambda-transmittance-loss", type=float, default=1)
-    parser.add_argument("--lambda-transmittance-ceil", type=float, default=0.88)
+    parser.add_argument("--transmittance-loss-ceil", type=float, default=0.88)
     parser.add_argument("--learning-rate", type=int, default=1e-2, help="Learning rate")
     parser.add_argument("--iterations", type=int, default=2000, help="Number of optimizer steps")
     parser.add_argument("--batch-size", type=int, default=32, help="Number of camera views within a single batch")
@@ -387,7 +387,7 @@ def main():
             occupancy_grid._update(
                 step=it,
                 # TODO @thomasw21: figure out what the correct step_size we use.
-                occ_eval_fn=lambda x: radiance_field.query_density(x) * 1e-2,
+                occ_eval_fn=lambda x: radiance_field.query_density(x) * 1e-3,
                 occ_thre=0.01,
                 # at which point we consider, it proposes a weird binary thing where you're higher than the mean clamped with this threshold
                 ema_decay=0.95,  # exponential decay in order to create some sort of inertia
@@ -414,6 +414,7 @@ def main():
         # Compute loss
         sublosses = [
             - mean_score,
+            - args.lambda_transmittance_loss * torch.clamp(1 - opacities.mean(), max=args.transmittance_loss_ceil)
             # args.lambda_transmittance_loss
         ]
         loss = sum(sublosses)
@@ -427,10 +428,10 @@ def main():
         if it % args.log_interval == 0:
             print(
                 f"iteration={it}/{args.iterations}| "
-                f"time per iteration={(time.time() - start_time) / nb_iterations_for_time_estimation:2f} sec / it | "
-                f"loss: {loss.detach()} | "
-                f"text/image score: {mean_score.detach()}"
-                f"opacity: {opacities.detach().mean()} | "
+                f"time per iteration={((time.time() - start_time) / nb_iterations_for_time_estimation):2f} sec / it | "
+                f"loss: {loss.detach():6f} | "
+                f"text/image score: {mean_score.detach():6f} | "
+                f"opacity: {opacities.detach().mean():6f} | "
             )
             nb_iterations_for_time_estimation = 0
             start_time = time.time()
