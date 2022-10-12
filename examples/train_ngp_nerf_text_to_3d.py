@@ -401,8 +401,11 @@ def main():
 
         # Log loss
         if it % args.log_interval == 0:
-            # TODO @thomasw21: get a logging mechanism going
-            raise NotImplementedError
+            print(
+                f"iteration={it} | "
+                f"loss: {loss.detach()} | "
+                f"opacity: {opacities.detach().mean()} | "
+            )
 
     pass
 
