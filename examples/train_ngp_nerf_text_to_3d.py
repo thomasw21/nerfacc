@@ -355,6 +355,9 @@ def data_augment(
             raise NotImplementedError
         elif background.CHECKERBOARD:
             raise NotImplementedError
+        elif background.WHITE:
+            background_color = torch.ones(N, H, W, 3, device=color.device)
+            color = color * opacity + background_color * (1 - opacity)
         else:
             raise ValueError
 
