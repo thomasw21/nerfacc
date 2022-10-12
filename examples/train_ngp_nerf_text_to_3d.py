@@ -32,8 +32,10 @@ def get_args():
 
     ### Optimizer
     # See DreamFields paper
-    parser.add_argument("--lambda-transmittance-loss", type=float, default=1)
+    parser.add_argument("--lambda-transmittance-loss", type=float, default=0.5)
     parser.add_argument("--transmittance-loss-ceil", type=float, default=0.88)
+    # Dreamfusion Open source implementation
+    parser.add_argument("--lambda-transmittance-entropy", type=float, default=1e-4)
     parser.add_argument("--learning-rate", type=float, default=1e-2, help="Learning rate")
     parser.add_argument("--iterations", type=int, default=2000, help="Number of optimizer steps")
     parser.add_argument("--batch-size", type=int, default=2, help="Number of camera views within a single batch")
@@ -309,8 +311,8 @@ def render_images(
         )
         results.append((color, opacity, depth))
 
-    color = torch.cat([elt[0] for elt in results]).view(N, image_height, image_width, 3)
-    opacity = torch.cat([elt[1] for elt in results]).view(N, image_height, image_width, 1)
+    color = torch.cat([elt[0] for elt in results], dim=0).view(N, image_height, image_width, 3)
+    opacity = torch.cat([elt[1] for elt in results], dim=0).view(N, image_height, image_width, 1)
 
     if add_random_colored_uniform_background:
         background_color = torch.rand(N, 1, 1, 3, device=color.device)
@@ -412,12 +414,22 @@ def main():
         scores = text_image_discriminator(encoded_images=encoded_images, encoded_texts=encoded_texts)
         mean_score = scores.mean()
 
+        sublosses = [- mean_score]
+        if args.lambda_transmittance_loss > 0:
+            sublosses.append(
+                - args.lambda_transmittance_loss * torch.clamp(1 - opacities.mean(), max=args.transmittance_loss_ceil)
+            )
+
+        # Compute entropy
+        if args.lambda_transmittance_entropy > 0:
+            clamped_opacities = torch.clamp(opacities, min=1e-5, max=1 - 1e-5)
+            minus_clamped_opacities = 1 - clamped_opacities
+            entropy = torch.mean( - clamped_opacities * torch.log(clamped_opacities) - minus_clamped_opacities * torch.log(minus_clamped_opacities))
+            sublosses.append(
+                args.lambda_transmittance_entropy * entropy
+            )
+
         # Compute loss
-        sublosses = [
-            - mean_score,
-            - args.lambda_transmittance_loss * torch.clamp(1 - opacities.mean(), max=args.transmittance_loss_ceil)
-            # args.lambda_transmittance_loss
-        ]
         loss = sum(sublosses)
 
         # Optimizer step
