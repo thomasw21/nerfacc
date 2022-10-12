@@ -34,9 +34,9 @@ def get_args():
     # See DreamFields paper
     parser.add_argument("--lambda-transmittance-loss", type=float, default=1)
     parser.add_argument("--transmittance-loss-ceil", type=float, default=0.88)
-    parser.add_argument("--learning-rate", type=int, default=1e-2, help="Learning rate")
+    parser.add_argument("--learning-rate", type=float, default=1e-2, help="Learning rate")
     parser.add_argument("--iterations", type=int, default=2000, help="Number of optimizer steps")
-    parser.add_argument("--batch-size", type=int, default=32, help="Number of camera views within a single batch")
+    parser.add_argument("--batch-size", type=int, default=2, help="Number of camera views within a single batch")
 
     ### Logging
     parser.add_argument("--log-interval", type=int, default=100, help="Log every n steps")
@@ -296,6 +296,7 @@ def render_images(
                 # far_plane=1.0,
                 early_stop_eps=1e-4,
                 # alpha_thre=1e-2,
+                stratified=True
             )
 
         # Differentiable Volumetric Rendering.
@@ -313,7 +314,7 @@ def render_images(
 
     if add_random_colored_uniform_background:
         background_color = torch.rand(N, 1, 1, 3, device=color.device)
-        color = color + background_color * (1 - opacity)
+        color = color * opacity + background_color * (1 - opacity)
 
     return color, opacity
 
