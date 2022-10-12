@@ -1,11 +1,12 @@
 import argparse
 import time
+from pathlib import Path
 from typing import Tuple, List, Callable
 
 import numpy as np
 import torch
 from torch import nn
-from tqdm import tqdm
+from torchvision.utils import save_image
 from transformers import CLIPModel, CLIPTokenizer, CLIPProcessor, AutoConfig
 
 import nerfacc
@@ -16,6 +17,8 @@ from radiance_fields.ngp import NGPradianceField
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--text", type=str, required=True, help="Text to fit")
+    parser.add_argument("--save-model", type=Path, required=True, help="Where to save the model")
+    parser.add_argument("--save-images", type=Path, required=True, help="Where to save the images that we generate at the end")
 
     ###
     parser.add_argument(
@@ -28,12 +31,15 @@ def get_args():
     parser.add_argument("--update-occupancy-grid-interval", type=int, default=16, help="Update occupancy grid every n steps")
 
     ### Optimizer
+    # See DreamFields paper
+    parser.add_argument("--lambda-transmittance-loss", type=float, default=1)
+    parser.add_argument("--lambda-transmittance-ceil", type=float, default=0.88)
     parser.add_argument("--learning-rate", type=int, default=1e-2, help="Learning rate")
     parser.add_argument("--iterations", type=int, default=2000, help="Number of optimizer steps")
     parser.add_argument("--batch-size", type=int, default=32, help="Number of camera views within a single batch")
 
     ### Logging
-    parser.add_argument("--log-interval", type=int, default=10, help="Log every n steps")
+    parser.add_argument("--log-interval", type=int, default=100, help="Log every n steps")
 
     args = parser.parse_args()
     args.grid_resolution = 128
@@ -301,6 +307,8 @@ def render_images(
 
     return color.view(N, image_height, image_width, 3), opacity.view(N, image_height, image_width, 1)
 
+def save_model(radiance_field: nn.Module, path: Path):
+    torch.save(radiance_field.state_dict(), path)
 
 def main():
     args = get_args()
@@ -390,11 +398,12 @@ def main():
         images = images.permute(0, 3, 1, 2) # [B, H, W, C] -> [B, C, H, W]
         encoded_images = text_image_discriminator.encode_images(images, encoded_texts=encoded_texts)
         scores = text_image_discriminator(encoded_images=encoded_images, encoded_texts=encoded_texts)
-        cosine_loss = - scores.mean()
+        mean_score = scores.mean()
 
         # Compute loss
         sublosses = [
-            cosine_loss
+            - mean_score,
+            # args.lambda_transmittance_loss
         ]
         loss = sum(sublosses)
 
@@ -409,12 +418,34 @@ def main():
                 f"iteration={it}/{args.iterations}| "
                 f"time per iteration={(time.time() - start_time) / nb_iterations_for_time_estimation:2f} sec / it | "
                 f"loss: {loss.detach()} | "
+                f"text/image score: {mean_score.detache()}"
                 f"opacity: {opacities.detach().mean()} | "
             )
             nb_iterations_for_time_estimation = 0
             start_time = time.time()
 
-    pass
+    # Save path
+    save_model(radiance_field, args.save_path)
+
+    # Generate some sample images
+    radiance_field.eval()
+    with torch.no_grad():
+        angles = generate_random_360_angles(32, device=device, stochastic_angles=True)
+        # TODO @thomasw21: define resolution
+        R, C, K = generate_sensors(256, 256, angles)
+        images, opacities = render_images(
+            radiance_field,
+            query_density=radiance_field.query_density,
+            # TODO @thomasw21: Check if I should actually feed the `occupancy_grid` or just rely on `query_density`
+            occupancy_grid=occupancy_grid,
+            image_height=256,
+            image_width=256,
+            sensors=(R, C, K)
+        )
+        save_image(
+            tensor=images.permute(0, 3, 1, 2), #channel first
+            fp=args.save_images,
+        )
 
 if __name__ == "__main__":
     main()
