@@ -6,6 +6,7 @@ from typing import Tuple, List, Callable, Optional
 
 import numpy as np
 import torch
+import torchvision.transforms
 from torch import nn
 from torchvision.utils import save_image
 from transformers import CLIPModel, CLIPTokenizer, CLIPProcessor, AutoConfig
@@ -258,9 +259,6 @@ def render_images(
     image_height: int,
     image_width: int,
     sensors: Sensors,
-    # flags
-    # TODO @thomasw21: Make random background color accessible through CLI
-    background: Optional[Background] = None
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     device = sensors[0].device
     camera_rotations, camera_centers, camera_intrinsics = sensors
@@ -321,9 +319,28 @@ def render_images(
 
     color = torch.cat([elt[0] for elt in results], dim=0).view(N, image_height, image_width, 3)
     opacity = torch.cat([elt[1] for elt in results], dim=0).view(N, image_height, image_width, 1)
+    return color, opacity
 
+def data_augment(
+    color: torch.Tensor,
+    opacity: torch.Tensor,
+    # TODO @thomasw21: Make random background color accessible through CLI
+    background: Optional[Background] = None
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    N, H, W, _ = color.shape
     # Do random crop
     # TODO @thomasw21: Adding a random crop would really increase data
+    img = torch.cat([
+        color.permute(3,0,1,2),
+        opacity.permute(3,0,1,2)
+    ])
+    transforms = torchvision.transforms.Compose([
+        # DreamFields
+        torchvision.transforms.RandomResizedCrop(size=(H, W), scale=(0.80, 1.0))
+    ])
+    img = transforms(img)
+    color = img[:3].permute(1,2,3,0)
+    opacity = img[-1:].permute(1,2,3,0)
 
     # Background
     if background is not None:
@@ -332,7 +349,7 @@ def render_images(
             background_color = torch.rand(N, 1, 1, 3, device=color.device)
             color = color * opacity + background_color * (1 - opacity)
         elif background.RANDOM_COLOR_BACKGROUND:
-            background_color = torch.rand(N, image_height, image_width, 3, device=color.device)
+            background_color = torch.rand(N, H, W, 3, device=color.device)
             color = color * opacity + background_color * (1 - opacity)
         elif background.RANDOM_TEXTURE:
             raise NotImplementedError
@@ -429,8 +446,10 @@ def main():
             image_height=image_height,
             image_width=image_width,
             sensors=sensors,
-            background=Background.RANDOM_COLOR_BACKGROUND
         )
+
+        # Augment images
+        images, opacities = data_augment(images, opacities, background=Background.RANDOM_COLOR_BACKGROUND)
 
         # Discriminate images with text
         images = images.permute(0, 3, 1, 2) # [B, H, W, C] -> [B, C, H, W]
