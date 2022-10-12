@@ -305,7 +305,6 @@ def render_images(
             packed_info=packed_info,
             t_starts=t_starts,
             t_ends=t_ends,
-            render_bkgd=
         )
         results.append((color, opacity, depth))
 
