@@ -429,7 +429,7 @@ def main():
                 f"iteration={it}/{args.iterations}| "
                 f"time per iteration={(time.time() - start_time) / nb_iterations_for_time_estimation:2f} sec / it | "
                 f"loss: {loss.detach()} | "
-                f"text/image score: {mean_score.detache()}"
+                f"text/image score: {mean_score.detach()}"
                 f"opacity: {opacities.detach().mean()} | "
             )
             nb_iterations_for_time_estimation = 0
