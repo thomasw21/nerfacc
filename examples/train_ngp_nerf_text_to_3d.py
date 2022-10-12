@@ -197,6 +197,7 @@ def get_sigma_fn(
         :params ray_indices: Ray indices that each sample belongs to. (n_samples,).
         :returns The post-activation density values. (n_samples, 1).
         """
+
         t_origins = rays_o[ray_indices]  # (n_samples, 3)
         t_dirs = rays_d[ray_indices]  # (n_samples, 3)
         # This essentially compute the mean position, we might instead jitter and randomly sample for robustness
@@ -259,34 +260,44 @@ def render_images(
     ], dim=-1) / camera_intrinsics[0,0] # [H, W, 3]
     directions = (camera_rotations[:, None, :, :] @ pixel_position_in_camera.view(1, image_height * image_width, 3, 1)).squeeze(-1) # [N, H, W, 3]
     # pixel_position_in_world = directions + C[:, None, None, :]
-    view_dirs = (directions / torch.linalg.norm(directions, dim=-1)[..., None]).view(-1, 3) # [N, H, W, 3]
+    view_dirs = (directions / torch.linalg.norm(directions, dim=-1)[..., None]).view(-1, 3) # [N, 3]
     # TODO @thomasw21: Figure out a way without copying data
     origins = torch.repeat_interleave(camera_centers, image_height * image_height, dim=0)
 
     #### From nerfacc README:
     # Efficient Raymarching: Skip empty and occluded space, pack samples from all rays.
     # packed_info: (n_rays, 2). t_starts: (n_samples, 1). t_ends: (n_samples, 1).
-    with torch.no_grad():
-        packed_info, t_starts, t_ends = nerfacc.ray_marching(
-            rays_o=origins,
-            rays_d=view_dirs,
-            sigma_fn=get_sigma_fn(query_density, rays_o=origins, rays_d=view_dirs),
-            scene_aabb=occupancy_grid.roi_aabb, # TODO @thomasw21: Need to pass it down otherwise this is going to be hell
-            grid=occupancy_grid, # This is fucked
-            # near_plane=0.2,
-            # far_plane=1.0,
-            early_stop_eps=1e-4,
-            alpha_thre=1e-2,
-        )
+    # TODO @thomasw21: determine the chunk size
+    chunk = 2**15
+    results = []
+    for i in range(0, N, chunk):
+        origins_shard = origins[i: i*chunk]
+        view_dirs_shard = view_dirs[i: i*chunk]
+        with torch.no_grad():
+            packed_info, t_starts, t_ends = nerfacc.ray_marching(
+                rays_o=origins_shard,
+                rays_d=view_dirs_shard,
+                sigma_fn=get_sigma_fn(query_density, rays_o=origins_shard, rays_d=view_dirs_shard),
+                scene_aabb=occupancy_grid.roi_aabb, # TODO @thomasw21: Need to pass it down otherwise this is going to be hell
+                grid=occupancy_grid, # This is fucked
+                # near_plane=0.2,
+                # far_plane=1.0,
+                early_stop_eps=1e-4,
+                # alpha_thre=1e-2,
+            )
 
-    # Differentiable Volumetric Rendering.
-    # colors: (n_rays, 3). opacity: (n_rays, 1). depth: (n_rays, 1).
-    color, opacity, depth = nerfacc.rendering(
-        rgb_sigma_fn=get_rgb_sigma_fn(radiance_field, rays_o=origins, rays_d=view_dirs),
-        packed_info=packed_info,
-        t_starts=t_starts,
-        t_ends=t_ends
-    )
+        # Differentiable Volumetric Rendering.
+        # colors: (n_rays, 3). opacity: (n_rays, 1). depth: (n_rays, 1).
+        color, opacity, depth = nerfacc.rendering(
+            rgb_sigma_fn=get_rgb_sigma_fn(radiance_field, rays_o=origins_shard, rays_d=view_dirs_shard),
+            packed_info=packed_info,
+            t_starts=t_starts,
+            t_ends=t_ends
+        )
+        results.append((color, opacity, depth))
+
+    color = torch.cat([elt[0] for elt in results])
+    opacity = torch.cat([elt[1] for elt in results])
 
     return color.view(N, image_height, image_width, 3), opacity.view(N, image_height, image_width, 1)
 
