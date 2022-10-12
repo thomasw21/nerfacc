@@ -313,7 +313,7 @@ def render_images(
 
     if add_random_colored_uniform_background:
         background_color = torch.rand(N, 1, 1, 3, device=color.device)
-        color = color + background_color * opacity
+        color = color + background_color * (1 - opacity)
 
     return color, opacity
 
