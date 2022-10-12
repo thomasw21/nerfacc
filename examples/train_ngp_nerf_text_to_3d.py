@@ -260,7 +260,7 @@ def render_images(
     ], dim=-1) / camera_intrinsics[0,0] # [H, W, 3]
     directions = (camera_rotations[:, None, :, :] @ pixel_position_in_camera.view(1, image_height * image_width, 3, 1)).squeeze(-1) # [N, H, W, 3]
     # pixel_position_in_world = directions + C[:, None, None, :]
-    view_dirs = (directions / torch.linalg.norm(directions, dim=-1)[..., None]).view(-1, 3) # [N, 3]
+    view_dirs = (directions / torch.linalg.norm(directions, dim=-1)[..., None]).view(-1, 3) # [N * image_height * image_width, 3]
     # TODO @thomasw21: Figure out a way without copying data
     origins = torch.repeat_interleave(camera_centers, image_height * image_height, dim=0)
 
@@ -270,9 +270,9 @@ def render_images(
     # TODO @thomasw21: determine the chunk size
     chunk = 2**15
     results = []
-    for i in range(0, N, chunk):
-        origins_shard = origins[i: i*chunk]
-        view_dirs_shard = view_dirs[i: i*chunk]
+    for i in range(0, N * image_height * image_width, chunk):
+        origins_shard = origins[i: i + chunk]
+        view_dirs_shard = view_dirs[i: i + chunk]
         with torch.no_grad():
             packed_info, t_starts, t_ends = nerfacc.ray_marching(
                 rays_o=origins_shard,
