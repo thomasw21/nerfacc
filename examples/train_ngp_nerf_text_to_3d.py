@@ -342,7 +342,11 @@ def main():
         }
 
     # training
-    for it in tqdm(range(args.iterations)):
+    start_time = time.time()
+    nb_iterations_for_time_estimation = 0
+    for it in range(args.iterations):
+        nb_iterations_for_time_estimation += 1
+
         # Set radiance field to trainable
         radiance_field.train()
 
@@ -402,10 +406,13 @@ def main():
         # Log loss
         if it % args.log_interval == 0:
             print(
-                f"iteration={it} | "
+                f"iteration={it}/{args.iterations}| "
+                f"time per iteration={(time.time() - start_time) / nb_iterations_for_time_estimation:2f} sec / it | "
                 f"loss: {loss.detach()} | "
                 f"opacity: {opacities.detach().mean()} | "
             )
+            nb_iterations_for_time_estimation = 0
+            start_time = time.time()
 
     pass
 
