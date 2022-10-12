@@ -253,7 +253,7 @@ def render_images(
     sensors: Sensors,
     # flags
     # TODO @thomasw21: Make random background color accessible through CLI
-    add_random_colored_uniform_background: bool = True
+    add_random_colored_uniform_background: bool = False
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     device = sensors[0].device
     camera_rotations, camera_centers, camera_intrinsics = sensors
