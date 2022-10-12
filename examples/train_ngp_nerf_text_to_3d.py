@@ -17,8 +17,8 @@ from radiance_fields.ngp import NGPradianceField
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--text", type=str, required=True, help="Text to fit")
-    parser.add_argument("--save-model", type=Path, required=True, help="Where to save the model")
-    parser.add_argument("--save-images", type=Path, required=True, help="Where to save the images that we generate at the end")
+    parser.add_argument("--save-model-path", type=Path, required=True, help="Where to save the model")
+    parser.add_argument("--save-images-path", type=Path, required=True, help="Where to save the images that we generate at the end")
 
     ###
     parser.add_argument(
@@ -44,8 +44,8 @@ def get_args():
     args = parser.parse_args()
     args.grid_resolution = 128
 
-    args.save_model.parent.mkdir(parents=True, exist_ok=True)
-    args.save_images.parent.mkdir(parents=True, exist_ok=True)
+    args.save_model_path.parent.mkdir(parents=True, exist_ok=True)
+    args.save_images_path.parent.mkdir(parents=True, exist_ok=True)
 
     return args
 
@@ -429,7 +429,7 @@ def main():
             start_time = time.time()
 
     # Save path
-    save_model(radiance_field, args.save_path)
+    save_model(radiance_field, args.save_model_path)
 
     # Generate some sample images
     radiance_field.eval()
@@ -448,7 +448,7 @@ def main():
         )
         save_image(
             tensor=images.permute(0, 3, 1, 2), #channel first
-            fp=args.save_images,
+            fp=args.save_images_path,
         )
 
 if __name__ == "__main__":
