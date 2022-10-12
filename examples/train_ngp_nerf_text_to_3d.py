@@ -509,13 +509,18 @@ def main():
             image_height=256,
             image_width=256,
             sensors=(R, C, K),
-            background=Background.WHITE
         )
         print(f"Saving images to {args.save_images_path.absolute()}")
         save_image(
             tensor=images.permute(0, 3, 1, 2), #channel first
             fp=args.save_images_path,
         )
+        images, opacities = data_augment(color=images, opacity=opacities, background=Background.WHITE)
+        save_image(
+            tensor=images.permute(0, 3, 1, 2),
+            fp=f"{args.save_images_path.stem}_aug{args.save_images_path.suffix}"
+        )
+
 
 if __name__ == "__main__":
     main()
