@@ -1,7 +1,8 @@
 import argparse
 import time
+from enum import Enum
 from pathlib import Path
-from typing import Tuple, List, Callable
+from typing import Tuple, List, Callable, Optional
 
 import numpy as np
 import torch
@@ -243,6 +244,12 @@ def get_rgb_sigma_fn(
         return rgbs, sigmas  # (n_samples, 3), (n_samples, 1)
     return rgb_sigma_fn
 
+class Background(Enum):
+    RANDOM_COLOR_UNIFORM_BACKGROUND = 1
+    RANDOM_COLOR_BACKGROUND = 2
+    RANDOM_TEXTURE = 3
+    CHECKERBOARD = 4
+    WHITE = 5
 
 def render_images(
     radiance_field: nn.Module,
@@ -253,11 +260,12 @@ def render_images(
     sensors: Sensors,
     # flags
     # TODO @thomasw21: Make random background color accessible through CLI
-    add_random_colored_uniform_background: bool = False
+    background: Optional[Background] = None
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     device = sensors[0].device
     camera_rotations, camera_centers, camera_intrinsics = sensors
     N = camera_rotations.shape[0]
+
     # Compute which rays we should run
     # # We for now compute the center of each pixel, thus the 0.5
     # # Get help: https://www.cs.cmu.edu/~16385/s17/Slides/11.1_Camera_matrix.pdf
@@ -314,9 +322,24 @@ def render_images(
     color = torch.cat([elt[0] for elt in results], dim=0).view(N, image_height, image_width, 3)
     opacity = torch.cat([elt[1] for elt in results], dim=0).view(N, image_height, image_width, 1)
 
-    if add_random_colored_uniform_background:
-        background_color = torch.rand(N, 1, 1, 3, device=color.device)
-        color = color * opacity + background_color * (1 - opacity)
+    # Do random crop
+    # TODO @thomasw21: Adding a random crop would really increase data
+
+    # Background
+    if background is not None:
+        # Single colored background
+        if background.RANDOM_COLOR_UNIFORM_BACKGROUND:
+            background_color = torch.rand(N, 1, 1, 3, device=color.device)
+            color = color * opacity + background_color * (1 - opacity)
+        elif background.RANDOM_COLOR_BACKGROUND:
+            background_color = torch.rand(N, image_height, image_width, 3, device=color.device)
+            color = color * opacity + background_color * (1 - opacity)
+        elif background.RANDOM_TEXTURE:
+            raise NotImplementedError
+        elif background.CHECKERBOARD:
+            raise NotImplementedError
+        else:
+            raise ValueError
 
     return color, opacity
 
@@ -405,7 +428,8 @@ def main():
             occupancy_grid=occupancy_grid,
             image_height=image_height,
             image_width=image_width,
-            sensors=sensors
+            sensors=sensors,
+            background=Background.RANDOM_COLOR_BACKGROUND
         )
 
         # Discriminate images with text
@@ -465,7 +489,8 @@ def main():
             occupancy_grid=occupancy_grid,
             image_height=256,
             image_width=256,
-            sensors=(R, C, K)
+            sensors=(R, C, K),
+            background=Background.WHITE
         )
         print(f"Saving images to {args.save_images_path.absolute()}")
         save_image(
