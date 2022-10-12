@@ -43,6 +43,10 @@ def get_args():
 
     args = parser.parse_args()
     args.grid_resolution = 128
+
+    args.save_model.parent.mkdir(parents=True, exist_ok=True)
+    args.save_images.parent.mkdir(parents=True, exist_ok=True)
+
     return args
 
 class TextImageDiscriminator(nn.Module):
