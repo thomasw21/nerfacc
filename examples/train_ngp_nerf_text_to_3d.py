@@ -249,7 +249,9 @@ def render_images(
     image_height: int,
     image_width: int,
     sensors: Sensors,
-    # scene_aabb: torch.Tensor
+    # flags
+    # TODO @thomasw21: Make random background color accessible through CLI
+    add_random_colored_uniform_background: bool = True
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     device = sensors[0].device
     camera_rotations, camera_centers, camera_intrinsics = sensors
@@ -302,16 +304,22 @@ def render_images(
             rgb_sigma_fn=get_rgb_sigma_fn(radiance_field, rays_o=origins_shard, rays_d=view_dirs_shard),
             packed_info=packed_info,
             t_starts=t_starts,
-            t_ends=t_ends
+            t_ends=t_ends,
+            render_bkgd=
         )
         results.append((color, opacity, depth))
 
-    color = torch.cat([elt[0] for elt in results])
-    opacity = torch.cat([elt[1] for elt in results])
+    color = torch.cat([elt[0] for elt in results]).view(N, image_height, image_width, 3)
+    opacity = torch.cat([elt[1] for elt in results]).view(N, image_height, image_width, 1)
 
-    return color.view(N, image_height, image_width, 3), opacity.view(N, image_height, image_width, 1)
+    if add_random_colored_uniform_background:
+        background_color = torch.rand(N, 1, 1, 3, device=color.device)
+        color = color + background_color * opacity
+
+    return color, opacity
 
 def save_model(radiance_field: nn.Module, path: Path):
+    print(f"Saving model to {path.absolute()}")
     torch.save(radiance_field.state_dict(), path)
 
 def main():
@@ -446,6 +454,7 @@ def main():
             image_width=256,
             sensors=(R, C, K)
         )
+        print(f"Saving images to {args.save_images_path.absolute()}")
         save_image(
             tensor=images.permute(0, 3, 1, 2), #channel first
             fp=args.save_images_path,
