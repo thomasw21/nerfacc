@@ -442,7 +442,7 @@ def main():
     # Generate some sample images
     radiance_field.eval()
     with torch.no_grad():
-        angles = generate_random_360_angles(32, device=device, stochastic_angles=True)
+        angles = generate_random_360_angles(32, device=device, stochastic_angles=False)
         # TODO @thomasw21: define resolution
         R, C, K = generate_sensors(256, 256, angles)
         images, opacities = render_images(
