@@ -345,18 +345,19 @@ def data_augment(
     # Background
     if background is not None:
         # Single colored background
-        if background.RANDOM_COLOR_UNIFORM_BACKGROUND:
+        if background is background.RANDOM_COLOR_UNIFORM_BACKGROUND:
             background_color = torch.rand(N, 1, 1, 3, device=color.device)
             color = color * opacity + background_color * (1 - opacity)
-        elif background.RANDOM_COLOR_BACKGROUND:
+        elif background is background.RANDOM_COLOR_BACKGROUND:
             background_color = torch.rand(N, H, W, 3, device=color.device)
             color = color * opacity + background_color * (1 - opacity)
-        elif background.RANDOM_TEXTURE:
+        elif background is background.RANDOM_TEXTURE:
             raise NotImplementedError
-        elif background.CHECKERBOARD:
+        elif background is background.CHECKERBOARD:
             raise NotImplementedError
-        elif background.WHITE:
-            background_color = torch.ones(N, H, W, 3, device=color.device)
+        elif background is background.WHITE:
+
+            background_color = torch.ones(1, 1, 1, 1, device=color.device)
             color = color * opacity + background_color * (1 - opacity)
         else:
             raise ValueError
@@ -519,8 +520,10 @@ def main():
             fp=args.save_images_path,
         )
         images, opacities = data_augment(color=images, opacity=opacities, background=Background.WHITE)
+        print(args.save_images_path, args.save_images_path.stem, args.save_images_path.absolute().stem)
         save_image(
             tensor=images.permute(0, 3, 1, 2),
+            # TODO @thomasw21: Debug why it this storing at toor
             fp=f"{args.save_images_path.stem}_aug{args.save_images_path.suffix}"
         )
 
