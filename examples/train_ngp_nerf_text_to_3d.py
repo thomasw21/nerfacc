@@ -2,6 +2,7 @@ import argparse
 import time
 from enum import Enum
 from pathlib import Path
+from random import choices
 from typing import Tuple, List, Callable, Optional
 
 import numpy as np
@@ -347,19 +348,17 @@ def data_augment(
         # Single colored background
         if background is background.RANDOM_COLOR_UNIFORM_BACKGROUND:
             background_color = torch.rand(N, 1, 1, 3, device=color.device)
-            color = color * opacity + background_color * (1 - opacity)
         elif background is background.RANDOM_COLOR_BACKGROUND:
             background_color = torch.rand(N, H, W, 3, device=color.device)
-            color = color * opacity + background_color * (1 - opacity)
         elif background is background.RANDOM_TEXTURE:
             raise NotImplementedError
         elif background is background.CHECKERBOARD:
             raise NotImplementedError
         elif background is background.WHITE:
             background_color = torch.ones(1, 1, 1, 1, device=color.device)
-            color = color * opacity + background_color * (1 - opacity)
         else:
             raise ValueError
+        color = color * opacity + background_color * (1 - opacity)
 
     return color, opacity
 
@@ -405,6 +404,14 @@ def main():
             text: text_image_discriminator.encode_texts([text])[0]
             for text in all_texts
         }
+
+    # background probabilities
+    training_background_probs = {
+        Background.RANDOM_COLOR_UNIFORM_BACKGROUND: 1,
+        Background.RANDOM_COLOR_BACKGROUND: 1,
+    }
+    training_backgrounds = list(training_background_probs.keys())
+
 
     # training
     start_time = time.time()
@@ -452,7 +459,8 @@ def main():
         )
 
         # Augment images
-        images, opacities = data_augment(images, opacities, background=Background.RANDOM_COLOR_BACKGROUND)
+        # TODO @thomasw21 change background for each image and not for each batch
+        images, opacities = data_augment(images, opacities, background=choices(training_backgrounds, weights=[training_background_probs[bkd] for bkd in training_backgrounds])[0])
 
         # Discriminate images with text
         images = images.permute(0, 3, 1, 2) # [B, H, W, C] -> [B, C, H, W]
