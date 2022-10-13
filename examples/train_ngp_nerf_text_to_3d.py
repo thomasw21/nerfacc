@@ -364,7 +364,7 @@ def data_augment(
             sq_x = H // nsq_x
             sq_y = W // nsq_y
             color1, color2 = torch.rand(2, N, 3, device=color.device)
-            background_color = color1[:, None, None, 3].repeat(1, H, W, 1).view(N, nsq_x, sq_x, nsq_y, sq_y, 3)
+            background_color = color1[:, None, None, :].repeat(1, H, W, 1).view(N, nsq_x, sq_x, nsq_y, sq_y, 3)
             background_color[:, ::2, :, 1::2, :, :] = color2
             background_color[:, 1::2, :, ::2, :, :] = color2
             background_color = background_color.view(N, H, W, 3)
@@ -377,7 +377,7 @@ def data_augment(
             min_blur, max_blur = (0.0, 10.)
             sigma_x, sigma_y = np.random.rand(2) * (max_blur - min_blur) + min_blur
             background_color = F.gaussian_blur(
-                background_color.permute(0, 3, 1, 2),
+                torch.broadcast_to(background_color, (N, H, W, 3)).permute(0, 3, 1, 2),
                 kernel_size=[15, 15],
                 # Weird, but it's in dreamfields https://github.com/google-research/google-research/blob/00392d6e3bd30bfe706859287035fcd8d53a010b/dreamfields/dreamfields/config/config_base.py#L130
                 sigma=[sigma_x, sigma_y]
