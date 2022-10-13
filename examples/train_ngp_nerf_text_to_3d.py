@@ -322,6 +322,7 @@ class Background(Enum):
     RANDOM_TEXTURE = 3
     CHECKERBOARD = 4
     WHITE = 5
+    BLACK = 6
 
 def data_augment(
     color: torch.Tensor,
@@ -369,6 +370,8 @@ def data_augment(
             background_color = background_color.view(N, H, W, 3)
         elif background is background.WHITE:
             background_color = torch.ones(1, 1, 1, 1, device=color.device)
+        elif background is background.BLACK:
+            background_color = torch.zeros(1, 1, 1, 1, device=color.device)
         else:
             raise ValueError
 
@@ -435,7 +438,10 @@ def main():
         Background.RANDOM_COLOR_UNIFORM_BACKGROUND: 1,
         Background.RANDOM_COLOR_BACKGROUND: 1,
         Background.CHECKERBOARD: 1,
-        Background.WHITE: 1,
+        # Should already be handled by `Background.RANDOM_COLOR_UNIFORM_BACKGROUND`
+        # Background.WHITE: 1,
+        # Background.BLACK: 1
+        # TODO @thomasw21: Implement
         # Background.RANDOM_TEXTURE: 1,
     }
     training_backgrounds = list(training_background_probs.keys())
