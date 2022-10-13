@@ -374,11 +374,13 @@ def data_augment(
             raise ValueError
 
         if blur_background:
+            min_blur, max_blur = (0.0, 10.)
+            sigma_x, sigma_y = np.random.rand(2) * (max_blur - min_blur) + min_blur
             background_color = F.gaussian_blur(
                 background_color.permute(0, 3, 1, 2),
                 kernel_size=[15, 15],
                 # Weird, but it's in dreamfields https://github.com/google-research/google-research/blob/00392d6e3bd30bfe706859287035fcd8d53a010b/dreamfields/dreamfields/config/config_base.py#L130
-                sigma=[0.0, 10.]
+                sigma=[sigma_x, sigma_y]
             ).permute(0, 2, 3, 1)
 
         color = color * opacity + background_color * (1 - opacity)
