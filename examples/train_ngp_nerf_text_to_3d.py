@@ -16,14 +16,20 @@ from transformers import CLIPModel, CLIPTokenizer, CLIPProcessor, AutoConfig
 import nerfacc
 from nerfacc import OccupancyGrid, ContractionType
 
+"""
+TODOs:
+ - Intermediary rendering to check that things are going well
+ - Validation at another angle from training. 
+"""
 
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--text", type=str, required=True, help="Text to fit")
     parser.add_argument("--save-model-path", type=Path, required=True, help="Where to save the model")
+    parser.add_argument("--load-model-path", type=Path, help="Where to load the model from")
     parser.add_argument("--save-images-path", type=Path, required=True, help="Where to save the images that we generate at the end")
 
-    ###
+    ### Training nerf configs
     parser.add_argument(
         "--aabb",
         type=lambda s: [float(item) for item in s.split(",")],
@@ -32,6 +38,8 @@ def get_args():
     )
     parser.add_argument("--unbounded", action="store_true", help="whether to use unbounded rendering")
     parser.add_argument("--update-occupancy-grid-interval", type=int, default=16, help="Update occupancy grid every n steps")
+    parser.add_argument("--training-theta", type=float, default=30, help="Elevation angle you're training at")
+    parser.add_argument("--validation-theta", type=float, default=45, help="Elevation angle you're training at")
 
     ### Optimizer
     # See DreamFields paper
@@ -140,12 +148,15 @@ Sensors = Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
 def generate_sensors(
     image_height: int,
     image_width: int,
-    angles: torch.Tensor
+    theta: int,
+    phis: torch.Tensor,
 ) -> Sensors:
-    N, = angles.shape
+    N, = phis.shape
+    device = phis.device
+    dtype = phis.dtype
 
     # Angle from equator, 30 degrees from equator
-    theta = (90 - 30) * np.pi / 180
+    theta = (90 - theta) * np.pi / 180
     # Rotate according to y-axis
     rot_theta = torch.tensor(
         [
@@ -153,15 +164,15 @@ def generate_sensors(
             [0, 1, 0],
             [-np.sin(theta), 0, np.cos(theta)],
         ],
-        device=angles.device,
-        dtype=angles.dtype
+        device=device,
+        dtype=dtype
     ) # [3, 3]
 
-    sin_angles = torch.sin(angles * np.pi / 180) # [N,]
-    cos_angles = torch.cos(angles * np.pi / 180) # [N,]
+    sin_angles = torch.sin(phis * np.pi / 180) # [N,]
+    cos_angles = torch.cos(phis * np.pi / 180) # [N,]
 
     # Rotate according to z-axis
-    rot_phi = torch.zeros(N, 3, 3, device=angles.device, dtype=angles.dtype)
+    rot_phi = torch.zeros(N, 3, 3, device=device, dtype=dtype)
     rot_phi[:, -1, -1] = 1
     rot_phi[:, 0, 0] = cos_angles
     rot_phi[:, 1, 0] = sin_angles
@@ -173,7 +184,7 @@ def generate_sensors(
     # Origins
     radius = 2
     origins = \
-        rotations @ torch.tensor([0, 0, radius], device=angles.device, dtype=angles.dtype)
+        rotations @ torch.tensor([0, 0, radius], device=device, dtype=dtype)
         # + torch.tensor([0.5, 0.5, 0.5], device=angles.device, dtype=angles.dtype) # origin of the bounding box is 0
 
     # Camera specific values
@@ -188,8 +199,8 @@ def generate_sensors(
             [0, 0, 1, 0],
             [0, 0, 0, 1],
         ],
-        device=angles.device,
-        dtype=angles.dtype
+        device=device,
+        dtype=dtype
     )
 
     return rotations, origins, K
@@ -407,17 +418,23 @@ def main():
         aabb=args.aabb,
         unbounded=args.unbounded,
     ).to(device)
+    # Load pretrained weights
+    if args.load_model_path is not None:
+        radiance_field.load_state_dict(torch.load(args.load_model_path, map_location=device))
 
+    # Optimizer only on 3D object
     optimizer = torch.optim.Adam(
         radiance_field.parameters(), lr=args.learning_rate
     )
 
+    # Image and text scorer
     text_image_discriminator = TextImageDiscriminator().to(device)
     # Freeze all CLIP weights.
     text_image_discriminator.eval()
     for name, params in text_image_discriminator.named_parameters():
         params.requires_grad = False
 
+    # Mechanism in order to have sparsity: Saves a bunch of compute
     occupancy_grid = OccupancyGrid(
         roi_aabb=args.aabb,
         resolution=args.grid_resolution,
@@ -459,12 +476,12 @@ def main():
         # generate a random camera view
         image_height, image_width = text_image_discriminator.image_height_width
 
-        angles = generate_random_360_angles(num_angles=args.batch_size, device=device)
+        phis = generate_random_360_angles(num_angles=args.batch_size, device=device)
 
         # Generate a view dependent prompt
         encoded_texts = torch.stack([
-            text_to_encodings[prompter.get_camera_view_prompt(angle)]
-            for angle in angles]
+            text_to_encodings[prompter.get_camera_view_prompt(phi)]
+            for phi in phis]
         )
 
         # Update sparse occupancy matrix every n steps
@@ -482,7 +499,12 @@ def main():
             )
 
         # Render image
-        sensors = generate_sensors(image_height=image_height, image_width=image_width, angles=angles)
+        sensors = generate_sensors(
+            image_height=image_height,
+            image_width=image_width,
+            theta=args.training_theta,
+            phis=phis
+        )
         images, opacities = render_images(
             radiance_field,
             query_density=radiance_field.query_density,
@@ -528,11 +550,12 @@ def main():
         # Log loss
         if it % args.log_interval == 0:
             print(
-                f"iteration={it}/{args.iterations}| "
-                f"time per iteration={((time.time() - start_time) / nb_iterations_for_time_estimation):2f} sec / it | "
+                f"iteration: {it}/{args.iterations}| "
+                f"time per iteration: {((time.time() - start_time) / nb_iterations_for_time_estimation):2f} sec / it | "
                 f"loss: {loss.detach():6f} | "
                 f"text/image score: {mean_score.detach():6f} | "
                 f"opacity: {opacities.detach().mean():6f} | "
+                f"{f'entropy: {entropy:6f} | ' if args.lambda_transmittance_entropy > 0 else ''}"
             )
             nb_iterations_for_time_estimation = 0
             start_time = time.time()
@@ -543,9 +566,14 @@ def main():
     # Generate some sample images
     radiance_field.eval()
     with torch.no_grad():
-        angles = generate_random_360_angles(32, device=device, stochastic_angles=False)
+        phis = generate_random_360_angles(32, device=device, stochastic_angles=False)
         # TODO @thomasw21: define resolution
-        R, C, K = generate_sensors(256, 256, angles)
+        R, C, K = generate_sensors(
+            image_height=256,
+            image_width=256,
+            theta=args.validation_theta,
+            phis=phis
+        )
         images, opacities = render_images(
             radiance_field,
             query_density=radiance_field.query_density,
