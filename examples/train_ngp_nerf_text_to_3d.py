@@ -356,7 +356,6 @@ def data_augment(
         elif background is background.CHECKERBOARD:
             raise NotImplementedError
         elif background is background.WHITE:
-
             background_color = torch.ones(1, 1, 1, 1, device=color.device)
             color = color * opacity + background_color * (1 - opacity)
         else:
@@ -520,11 +519,9 @@ def main():
             fp=args.save_images_path,
         )
         images, opacities = data_augment(color=images, opacity=opacities, background=Background.WHITE)
-        print(args.save_images_path, args.save_images_path.stem, args.save_images_path.absolute().stem)
         save_image(
             tensor=images.permute(0, 3, 1, 2),
-            # TODO @thomasw21: Debug why it this storing at toor
-            fp=f"{args.save_images_path.stem}_aug{args.save_images_path.suffix}"
+            fp=args.save_images_path.parent / f"{args.save_images_path.stem}_aug{args.save_images_path.suffix}"
         )
 
 
