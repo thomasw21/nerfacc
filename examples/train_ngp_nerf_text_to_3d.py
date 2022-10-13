@@ -8,6 +8,7 @@ from typing import Tuple, List, Callable, Optional
 import numpy as np
 import torch
 import torchvision.transforms
+from torchvision.transforms import functional as F
 from torch import nn
 from torchvision.utils import save_image
 from transformers import CLIPModel, CLIPTokenizer, CLIPProcessor, AutoConfig
@@ -246,12 +247,6 @@ def get_rgb_sigma_fn(
         return rgbs, sigmas  # (n_samples, 3), (n_samples, 1)
     return rgb_sigma_fn
 
-class Background(Enum):
-    RANDOM_COLOR_UNIFORM_BACKGROUND = 1
-    RANDOM_COLOR_BACKGROUND = 2
-    RANDOM_TEXTURE = 3
-    CHECKERBOARD = 4
-    WHITE = 5
 
 def render_images(
     radiance_field: nn.Module,
@@ -322,11 +317,19 @@ def render_images(
     opacity = torch.cat([elt[1] for elt in results], dim=0).view(N, image_height, image_width, 1)
     return color, opacity
 
+class Background(Enum):
+    RANDOM_COLOR_UNIFORM_BACKGROUND = 1
+    RANDOM_COLOR_BACKGROUND = 2
+    RANDOM_TEXTURE = 3
+    CHECKERBOARD = 4
+    WHITE = 5
+
 def data_augment(
     color: torch.Tensor,
     opacity: torch.Tensor,
     # TODO @thomasw21: Make random background color accessible through CLI
-    background: Optional[Background] = None
+    background: Optional[Background] = None,
+    blur_background: bool = True
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     N, H, W, _ = color.shape
     # Do random crop
@@ -353,11 +356,31 @@ def data_augment(
         elif background is background.RANDOM_TEXTURE:
             raise NotImplementedError
         elif background is background.CHECKERBOARD:
-            raise NotImplementedError
+            # https://github.com/google-research/google-research/blob/4f54cade26f40728be7fda05c89011f89b7b7b7f/dreamfields/experiments/diffusion_3d/augment.py#L40
+            nsq_x = 5
+            nsq_y = 5
+            assert H % nsq_x == 0
+            assert W % nsq_y == 0
+            sq_x = H // nsq_x
+            sq_y = W // nsq_y
+            color1, color2 = torch.rand(2, N, 3, device=color.device)
+            background_color = color1[:, None, None, 3].repeat(1, H, W, 1).view(N, nsq_x, sq_x, nsq_y, sq_y, 3)
+            background_color[:, ::2, :, 1::2, :, :] = color2
+            background_color[:, 1::2, :, ::2, :, :] = color2
+            background_color = background_color.view(N, H, W, 3)
         elif background is background.WHITE:
             background_color = torch.ones(1, 1, 1, 1, device=color.device)
         else:
             raise ValueError
+
+        if blur_background:
+            background_color = F.gaussian_blur(
+                background_color.permute(0, 3, 1, 2),
+                kernel_size=[15, 15],
+                # Weird, but it's in dreamfields https://github.com/google-research/google-research/blob/00392d6e3bd30bfe706859287035fcd8d53a010b/dreamfields/dreamfields/config/config_base.py#L130
+                sigma=[0.0, 10.]
+            ).permute(0, 2, 3, 1)
+
         color = color * opacity + background_color * (1 - opacity)
 
     return color, opacity
@@ -409,6 +432,9 @@ def main():
     training_background_probs = {
         Background.RANDOM_COLOR_UNIFORM_BACKGROUND: 1,
         Background.RANDOM_COLOR_BACKGROUND: 1,
+        Background.CHECKERBOARD: 1,
+        Background.WHITE: 1,
+        # Background.RANDOM_TEXTURE: 1,
     }
     training_backgrounds = list(training_background_probs.keys())
 
