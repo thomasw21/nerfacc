@@ -357,8 +357,8 @@ def data_augment(
             raise NotImplementedError
         elif background is background.CHECKERBOARD:
             # https://github.com/google-research/google-research/blob/4f54cade26f40728be7fda05c89011f89b7b7b7f/dreamfields/experiments/diffusion_3d/augment.py#L40
-            nsq_x = 5
-            nsq_y = 5
+            nsq_x = 8
+            nsq_y = 8
             assert H % nsq_x == 0
             assert W % nsq_y == 0
             sq_x = H // nsq_x
