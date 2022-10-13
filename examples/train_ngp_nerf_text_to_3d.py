@@ -15,7 +15,6 @@ from transformers import CLIPModel, CLIPTokenizer, CLIPProcessor, AutoConfig
 
 import nerfacc
 from nerfacc import OccupancyGrid, ContractionType
-from radiance_fields.ngp import NGPradianceField
 
 
 def get_args():
@@ -335,16 +334,16 @@ def data_augment(
     # Do random crop
     # TODO @thomasw21: Adding a random crop would really increase data
     img = torch.cat([
-        color.permute(3,0,1,2),
-        opacity.permute(3,0,1,2)
+        color.permute(3, 0, 1, 2),
+        opacity.permute(3, 0, 1, 2)
     ])
     transforms = torchvision.transforms.Compose([
         # DreamFields
         torchvision.transforms.RandomResizedCrop(size=(H, W), scale=(0.80, 1.0))
     ])
     img = transforms(img)
-    color = img[:3].permute(1,2,3,0)
-    opacity = img[-1:].permute(1,2,3,0)
+    color = img[:3].permute(1, 2, 3, 0)
+    opacity = img[-1:].permute(1, 2, 3, 0)
 
     # Background
     if background is not None:
@@ -365,8 +364,8 @@ def data_augment(
             sq_y = W // nsq_y
             color1, color2 = torch.rand(2, N, 3, device=color.device)
             background_color = color1[:, None, None, :].repeat(1, H, W, 1).view(N, nsq_x, sq_x, nsq_y, sq_y, 3)
-            background_color[:, ::2, :, 1::2, :, :] = color2
-            background_color[:, 1::2, :, ::2, :, :] = color2
+            background_color[:, ::2, :, 1::2, :, :] = color2[:, None, None, None, None, :]
+            background_color[:, 1::2, :, ::2, :, :] = color2[:, None, None, None, None, :]
             background_color = background_color.view(N, H, W, 3)
         elif background is background.WHITE:
             background_color = torch.ones(1, 1, 1, 1, device=color.device)
@@ -400,6 +399,7 @@ def main():
         device = torch.device("cpu")
 
     # Setup neural network blocks
+    from radiance_fields.ngp import NGPradianceField
     radiance_field = NGPradianceField(
         aabb=args.aabb,
         unbounded=args.unbounded,
