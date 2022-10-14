@@ -420,9 +420,9 @@ def data_augment(
                 sq_y = W // nsq_y
                 color1, color2 = torch.rand(2, 3, device=color.device)
                 background_color = color1[None, None, :].repeat(H, W, 1).view(nsq_x, sq_x, nsq_y, sq_y, 3)
-                background_color[::2, :, 1::2, :, :] = color2[:, None, None, None, None, :]
-                background_color[1::2, :, ::2, :, :] = color2[:, None, None, None, None, :]
-                background_color = background_color.view(N, H, W, 3)
+                background_color[::2, :, 1::2, :, :] = color2[None, None, None, None, :]
+                background_color[1::2, :, ::2, :, :] = color2[None, None, None, None, :]
+                background_color = background_color.view(H, W, 3)
             elif background is background.WHITE:
                 background_color = torch.ones(1, 1, 1, device=color.device)
             elif background is background.BLACK:
