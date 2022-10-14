@@ -648,7 +648,7 @@ def main():
             color=images,
             opacity=opacities,
             backgrounds=[Background.WHITE for _ in range(len(images))]
-        )g
+        )
         save_image(
             tensor=images.permute(0, 3, 1, 2),
             fp=args.save_images_path.parent / f"{args.save_images_path.stem}_aug{args.save_images_path.suffix}"
