@@ -14,7 +14,7 @@ from torchvision.utils import save_image
 from transformers import CLIPModel, CLIPTokenizer, CLIPProcessor, AutoConfig
 
 import nerfacc
-from nerfacc import OccupancyGrid, ContractionType
+from nerfacc import OccupancyGrid, ContractionType, unpack_info, render_visibility
 
 """
 TODOs:
@@ -38,6 +38,7 @@ def get_args():
     )
     parser.add_argument("--unbounded", action="store_true", help="whether to use unbounded rendering")
     parser.add_argument("--update-occupancy-grid-interval", type=int, default=16, help="Update occupancy grid every n steps")
+    parser.add_argument("--ray-resample-in-training", action="store_true")
     parser.add_argument("--training-theta", type=float, default=30, help="Elevation angle you're training at")
     parser.add_argument("--validation-theta", type=float, default=45, help="Elevation angle you're training at")
 
@@ -265,6 +266,7 @@ def render_images(
     image_height: int,
     image_width: int,
     sensors: Sensors,
+    ray_resample: bool = False
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     device = sensors[0].device
     camera_rotations, camera_centers, camera_intrinsics = sensors
@@ -303,15 +305,56 @@ def render_images(
             packed_info, t_starts, t_ends = nerfacc.ray_marching(
                 rays_o=origins_shard,
                 rays_d=view_dirs_shard,
-                sigma_fn=get_sigma_fn(query_density, rays_o=origins_shard, rays_d=view_dirs_shard),
+                sigma_fn=None,
                 scene_aabb=occupancy_grid.roi_aabb, # TODO @thomasw21: Need to pass it down otherwise this is going to be hell
                 grid=occupancy_grid, # This is fucked
                 # near_plane=0.2,
                 # far_plane=1.0,
-                early_stop_eps=1e-4,
-                # alpha_thre=1e-2,
+                # early_stop_eps=1e-4,
+                alpha_thre=1e-4, # nerfstudio uses 1e-4, default is 0.0
                 stratified=True
             )
+
+            if rays_resample:
+                # Select only visible segments
+                # Query sigma without gradients
+                ray_indices = unpack_info(packed_info)
+                sigmas = get_sigma_fn(query_density, rays_o=origins_shard, rays_d=view_dirs_shard)(t_starts, t_ends,
+                                                                                                   ray_indices.long())
+                assert (
+                        sigmas.shape == t_starts.shape
+                ), "sigmas must have shape of (N, 1)! Got {}".format(sigmas.shape)
+                alphas = 1.0 - torch.exp(-sigmas * (t_ends - t_starts))
+                # TODO @thomasw21: Reduce significantly the number of samples on that ray.
+                packed_info, t_starts, t_ends = nerfacc.ray_resampling(
+                    packed_info=packed_info,
+                    t_starts=t_starts,
+                    t_ends=t_ends,
+                    weights=alphas,
+                    n_samples=196,
+                )
+            else:
+
+                # Select only visible segments
+                # Query sigma without gradients
+                ray_indices = unpack_info(packed_info)
+                sigmas = get_sigma_fn(query_density, rays_o=origins_shard, rays_d=view_dirs_shard)(t_starts, t_ends, ray_indices.long())
+                assert (
+                        sigmas.shape == t_starts.shape
+                ), "sigmas must have shape of (N, 1)! Got {}".format(sigmas.shape)
+                alphas = 1.0 - torch.exp(-sigmas * (t_ends - t_starts))
+
+                # Compute visibility of the samples, and filter out invisible samples
+                visibility, packed_info_visible = render_visibility(
+                    packed_info,
+                    alphas,
+                    early_stop_eps=1e-4,
+                    alpha_thre=1e-4
+                )
+                t_starts, t_ends = t_starts[visibility], t_ends[visibility]
+                packed_info = packed_info_visible
+
+
 
         # Differentiable Volumetric Rendering.
         # colors: (n_rays, 3). opacity: (n_rays, 1). depth: (n_rays, 1).
@@ -423,6 +466,7 @@ def main():
         radiance_field.load_state_dict(torch.load(args.load_model_path, map_location=device))
 
     # Optimizer only on 3D object
+    # TODO @thomasw21: Determine if we run tcnn.optimizers
     optimizer = torch.optim.Adam(
         radiance_field.parameters(), lr=args.learning_rate
     )
@@ -512,6 +556,7 @@ def main():
             image_height=image_height,
             image_width=image_width,
             sensors=sensors,
+            ray_resample=args.ray_resample_in_training
         )
 
         # Augment images

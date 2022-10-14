@@ -188,10 +188,12 @@ class NGPradianceField(torch.nn.Module):
         positions: torch.Tensor,
         directions: torch.Tensor = None,
     ):
-        if self.use_viewdirs and (directions is not None):
+        if directions is not None:
             assert (
                 positions.shape == directions.shape
             ), f"{positions.shape} v.s. {directions.shape}"
             density, embedding = self.query_density(positions, return_feat=True)
             rgb = self._query_rgb(directions, embedding=embedding)
-        return rgb, density
+            return rgb, density
+        else:
+            raise NotImplementedError
