@@ -289,7 +289,8 @@ def render_images(
     image_height: int,
     image_width: int,
     sensors: Sensors,
-    ray_resample: bool = False
+    ray_resample: bool = False,
+    stratified: bool = False,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     device = sensors[0].device
     camera_rotations, camera_centers, camera_intrinsics = sensors
@@ -335,7 +336,7 @@ def render_images(
                 # far_plane=1.0,
                 # early_stop_eps=1e-4,
                 alpha_thre=1e-4, # nerfstudio uses 1e-4, default is 0.0
-                stratified=True
+                stratified=stratified
             )
 
             sigma_fn = get_sigma_fn(query_density, rays_o=origins_shard, rays_d=view_dirs_shard)
@@ -590,7 +591,8 @@ def main():
             image_height=image_height,
             image_width=image_width,
             sensors=sensors,
-            ray_resample=args.ray_resample_in_training
+            ray_resample=args.ray_resample_in_training,
+            stratified=True,
         )
 
         # Augment images
@@ -679,6 +681,7 @@ def main():
             image_height=256,
             image_width=256,
             sensors=(R, C, K),
+            stratified=False
         )
         print(f"Saving images to {args.save_images_path.absolute()}")
         save_image(
