@@ -656,7 +656,7 @@ def main():
             device=device,
             stochastic_angles=False,
             theta_range=args.validation_thetas,
-            phi_range=args.valitation_phis
+            phi_range=args.validation_phis
         )
         # TODO @thomasw21: define resolution
         R, C, K = generate_sensors(
