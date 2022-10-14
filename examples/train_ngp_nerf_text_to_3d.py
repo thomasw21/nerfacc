@@ -327,7 +327,7 @@ def render_images(
                     packed_info=packed_info,
                     t_starts=t_starts,
                     t_ends=t_ends,
-                    weights=alphas,
+                    weights=alphas.squeeze(-1),
                     n_samples=196,
                 )
             else:
