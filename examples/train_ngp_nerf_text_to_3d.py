@@ -157,8 +157,14 @@ def generate_random_angles(
         thetas = torch.rand(num_angles, device=device) * (max_theta - min_theta) + min_theta
         phis = torch.rand(num_angles, device=device) * (max_phi - min_phi) + min_phi
     else:
-        thetas = torch.arange(min_theta, max_theta, step=(max_theta - min_theta) / num_angles, device=device)
-        phis = torch.arange(min_phi, max_phi, step=(max_phi - min_phi) / num_angles, device=device)
+        if max_theta == min_theta:
+            thetas = torch.full((num_angles,), min_theta, device=device)
+        else:
+            thetas = torch.arange(min_theta, max_theta, step=(max_theta - min_theta) / num_angles, device=device)
+        if min_phi == max_phi:
+            phis = torch.full((num_angles,), min_phi, device=device)
+        else:
+            phis = torch.arange(min_phi, max_phi, step=(max_phi - min_phi) / num_angles, device=device)
     return thetas, phis
 
 
