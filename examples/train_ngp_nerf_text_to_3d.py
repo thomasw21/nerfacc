@@ -315,15 +315,12 @@ def render_images(
                 stratified=True
             )
 
+            sigma_fn = get_sigma_fn(query_density, rays_o=origins_shard, rays_d=view_dirs_shard)
             if ray_resample:
                 # Select only visible segments
                 # Query sigma without gradients
                 ray_indices = unpack_info(packed_info)
-                sigmas = get_sigma_fn(query_density, rays_o=origins_shard, rays_d=view_dirs_shard)(t_starts, t_ends,
-                                                                                                   ray_indices.long())
-                assert (
-                        sigmas.shape == t_starts.shape
-                ), "sigmas must have shape of (N, 1)! Got {}".format(sigmas.shape)
+                sigmas = sigma_fn(t_starts, t_ends, ray_indices.long()).squeeze(-1)
                 alphas = 1.0 - torch.exp(-sigmas * (t_ends - t_starts))
                 # TODO @thomasw21: Reduce significantly the number of samples on that ray.
                 packed_info, t_starts, t_ends = nerfacc.ray_resampling(
@@ -338,7 +335,7 @@ def render_images(
                 # Select only visible segments
                 # Query sigma without gradients
                 ray_indices = unpack_info(packed_info)
-                sigmas = get_sigma_fn(query_density, rays_o=origins_shard, rays_d=view_dirs_shard)(t_starts, t_ends, ray_indices.long())
+                sigmas = sigma_fn(t_starts, t_ends, ray_indices.long())
                 assert (
                         sigmas.shape == t_starts.shape
                 ), "sigmas must have shape of (N, 1)! Got {}".format(sigmas.shape)
