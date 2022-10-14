@@ -39,8 +39,10 @@ def get_args():
     parser.add_argument("--unbounded", action="store_true", help="whether to use unbounded rendering")
     parser.add_argument("--update-occupancy-grid-interval", type=int, default=16, help="Update occupancy grid every n steps")
     parser.add_argument("--ray-resample-in-training", action="store_true")
-    parser.add_argument("--training-theta", type=float, default=30, help="Elevation angle you're training at")
-    parser.add_argument("--validation-theta", type=float, default=45, help="Elevation angle you're training at")
+    parser.add_argument("--training-thetas", type=lambda x: tuple(float(elt) for elt in x), default=[60, 90], help="Elevation angle you're training at")
+    parser.add_argument("--training-phis", type=lambda x: tuple(float(elt) for elt in x), default=[0, 360], help="Around the lattitude you're training at")
+    parser.add_argument("--validation-thetas", type=lambda x: tuple(float(elt) for elt in x), default=[45,45], help="Elevation angle you're validatin at")
+    parser.add_argument("--validation-phis", type=lambda x: tuple(float(elt) for elt in x), default=[0, 360], help="Around the lattitude you're validating at")
 
     ### Optimizer
     # See DreamFields paper
@@ -48,6 +50,8 @@ def get_args():
     parser.add_argument("--transmittance-loss-ceil", type=float, default=0.88)
     # Dreamfusion Open source implementation
     parser.add_argument("--lambda-transmittance-entropy", type=float, default=1e-4)
+    # Center loss, for all the sigmas to be close to 0
+    parser.add_argument("--lambda-center-loss", type=float, default=0.0)
     parser.add_argument("--learning-rate", type=float, default=1e-2, help="Learning rate")
     parser.add_argument("--iterations", type=int, default=2000, help="Number of optimizer steps")
     parser.add_argument("--batch-size", type=int, default=2, help="Number of camera views within a single batch")
@@ -138,18 +142,32 @@ class ViewDependentPrompter:
         return [self.get_prompt(suffix) for suffix in self.suffixes]
 
 @torch.no_grad()
-def generate_random_360_angles(num_angles: int, device: torch.device, stochastic_angles: bool = True) -> torch.Tensor:
+def generate_random_angles(
+    num_angles: int,
+    device: torch.device,
+    theta_range: Tuple[float, float],
+    phi_range: Tuple[float, float],
+    stochastic_angles: bool = True
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    # TODO @thomasw21: Interestingly this doesn't sample uniformily around the cirle (typically upsample regions around the poles)
+    #  - To sample around the circle you need use normalized gaussian but otherwise I need to figure things out.
+    min_theta, max_theta = theta_range
+    min_phi, max_phi = phi_range
     if stochastic_angles:
-        return torch.rand(num_angles, device=device) * 360.0
+        thetas = torch.rand(num_angles, device=device) * (max_theta - min_theta) + min_theta
+        phis = torch.rand(num_angles, device=device) * (max_phi - min_phi) + min_phi
     else:
-        return torch.arange(num_angles, device=device) * (360.0 / num_angles)
+        thetas = torch.arange(min_theta, max_theta, step=(max_theta - min_theta) / num_angles, device=device)
+        phis = torch.arange(min_phi, max_phi, step=(max_phi - min_phi) / num_angles, device=device)
+    return thetas, phis
+
 
 Sensors = Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
 @torch.no_grad()
 def generate_sensors(
     image_height: int,
     image_width: int,
-    theta: int,
+    thetas: torch.Tensor,
     phis: torch.Tensor,
 ) -> Sensors:
     N, = phis.shape
@@ -157,28 +175,27 @@ def generate_sensors(
     dtype = phis.dtype
 
     # Angle from equator, 30 degrees from equator
-    theta = (90 - theta) * np.pi / 180
-    # Rotate according to y-axis
-    rot_theta = torch.tensor(
-        [
-            [np.cos(theta), 0, np.sin(theta)],
-            [0, 1, 0],
-            [-np.sin(theta), 0, np.cos(theta)],
-        ],
-        device=device,
-        dtype=dtype
-    ) # [3, 3]
+    thetas = thetas * np.pi / 180
+    sin_thetas = torch.sin(thetas)
+    cos_thetas = torch.cos(thetas)
+    rot_theta = torch.zeros(N, 3, 3, device=device, dtype=dtype)
+    rot_theta[:, 1, 1] = 1
+    rot_theta[:, 0, 0] = cos_thetas
+    rot_theta[:, 2, 0] = -sin_thetas
+    rot_theta[:, 0, 2] = sin_thetas
+    rot_theta[:, 2, 2] = cos_thetas
 
-    sin_angles = torch.sin(phis * np.pi / 180) # [N,]
-    cos_angles = torch.cos(phis * np.pi / 180) # [N,]
+    phis = phis * np.pi / 180
+    sin_phis = torch.sin(phis) # [N,]
+    cos_phis = torch.cos(phis) # [N,]
 
     # Rotate according to z-axis
     rot_phi = torch.zeros(N, 3, 3, device=device, dtype=dtype)
     rot_phi[:, -1, -1] = 1
-    rot_phi[:, 0, 0] = cos_angles
-    rot_phi[:, 1, 0] = sin_angles
-    rot_phi[:, 0, 1] = -sin_angles
-    rot_phi[:, 1, 1] = cos_angles
+    rot_phi[:, 0, 0] = cos_phis
+    rot_phi[:, 1, 0] = sin_phis
+    rot_phi[:, 0, 1] = -sin_phis
+    rot_phi[:, 1, 1] = cos_phis
 
     rotations = rot_phi @ rot_theta
 
@@ -230,7 +247,7 @@ def get_sigma_fn(
         # This essentially compute the mean position, we might instead jitter and randomly sample for robustness
         positions = t_origins + t_dirs * (t_starts + t_ends) / 2.0
         sigmas = query_density(positions)
-        return sigmas  # (n_samples, 1)
+        return sigmas, positions  # (n_samples, 1)
     return sigma_fn
 
 def get_rgb_sigma_fn(
@@ -255,7 +272,7 @@ def get_rgb_sigma_fn(
         # This essentially compute the mean position, we might instead jitter and randomly sample for robustness
         positions = t_origins + t_dirs * (t_starts + t_ends) / 2.0
         rgbs, sigmas = radiance_field(positions, t_dirs)
-        return rgbs, sigmas  # (n_samples, 3), (n_samples, 1)
+        return rgbs, sigmas, positions  # (n_samples, 3), (n_samples, 1)
     return rgb_sigma_fn
 
 
@@ -320,7 +337,7 @@ def render_images(
                 # Select only visible segments
                 # Query sigma without gradients
                 ray_indices = unpack_info(packed_info)
-                sigmas = sigma_fn(t_starts, t_ends, ray_indices.long())
+                sigmas, _ = sigma_fn(t_starts, t_ends, ray_indices.long())
                 alphas = 1.0 - torch.exp(-sigmas * (t_ends - t_starts))
                 # TODO @thomasw21: Reduce significantly the number of samples on that ray.
                 packed_info, t_starts, t_ends = nerfacc.ray_resampling(
@@ -335,7 +352,7 @@ def render_images(
                 # Select only visible segments
                 # Query sigma without gradients
                 ray_indices = unpack_info(packed_info)
-                sigmas = sigma_fn(t_starts, t_ends, ray_indices.long())
+                sigmas, _ = sigma_fn(t_starts, t_ends, ray_indices.long())
                 assert (
                         sigmas.shape == t_starts.shape
                 ), "sigmas must have shape of (N, 1)! Got {}".format(sigmas.shape)
@@ -355,13 +372,16 @@ def render_images(
 
         # Differentiable Volumetric Rendering.
         # colors: (n_rays, 3). opacity: (n_rays, 1). depth: (n_rays, 1).
+        rgb_sigma_fn = get_rgb_sigma_fn(radiance_field, rays_o=origins_shard, rays_d=view_dirs_shard)
         color, opacity, depth = nerfacc.rendering(
-            rgb_sigma_fn=get_rgb_sigma_fn(radiance_field, rays_o=origins_shard, rays_d=view_dirs_shard),
+            rgb_sigma_fn=lambda *args: rgb_sigma_fn(*args)[:2],
             packed_info=packed_info,
             t_starts=t_starts,
             t_ends=t_ends,
         )
         results.append((color, opacity, depth))
+
+        # Compute sigma loss to force the model to be at the center
 
     color = torch.cat([elt[0] for elt in results], dim=0).view(N, image_height, image_width, 3)
     opacity = torch.cat([elt[1] for elt in results], dim=0).view(N, image_height, image_width, 1)
@@ -523,7 +543,12 @@ def main():
         # generate a random camera view
         image_height, image_width = text_image_discriminator.image_height_width
 
-        phis = generate_random_360_angles(num_angles=args.batch_size, device=device)
+        thetas, phis = generate_random_angles(
+            num_angles=args.batch_size,
+            device=device,
+            theta_range=args.training_thetas,
+            phi_range=args.training_phis,
+        )
 
         # Generate a view dependent prompt
         encoded_texts = torch.stack([
@@ -549,7 +574,7 @@ def main():
         sensors = generate_sensors(
             image_height=image_height,
             image_width=image_width,
-            theta=args.training_theta,
+            thetas=thetas,
             phis=phis
         )
         images, opacities = render_images(
@@ -595,6 +620,10 @@ def main():
                 args.lambda_transmittance_entropy * entropy
             )
 
+        # TODO @thomasw21: force everything to be at the center, or track sigmas center. and translate in the NeRF model
+        if args.lambda_center_loss > 0:
+            raise NotImplementedError
+
         # Compute loss
         loss = sum(sublosses)
 
@@ -622,12 +651,18 @@ def main():
     # Generate some sample images
     radiance_field.eval()
     with torch.no_grad():
-        phis = generate_random_360_angles(32, device=device, stochastic_angles=False)
+        thetas, phis = generate_random_angles(
+            32,
+            device=device,
+            stochastic_angles=False,
+            theta_range=args.validation_thetas,
+            phi_range=args.valitation_phis
+        )
         # TODO @thomasw21: define resolution
         R, C, K = generate_sensors(
             image_height=256,
             image_width=256,
-            theta=args.validation_theta,
+            thetas=thetas,
             phis=phis
         )
         images, opacities = render_images(
