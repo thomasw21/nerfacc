@@ -497,7 +497,7 @@ def main():
 
     # Optimizer only on 3D object
     # TODO @thomasw21: Determine if we run tcnn.optimizers
-    grad_scaler = torch.cuda.amp.GradScaler(2 ** 10)
+    grad_scaler = torch.cuda.amp.GradScaler()
     optimizer = torch.optim.Adam(
         radiance_field.parameters(), lr=args.learning_rate
     )
@@ -640,6 +640,7 @@ def main():
         optimizer.zero_grad()
         grad_scaler.scale(loss).backward()
         grad_scaler.step(optimizer)
+        grad_scaler.update()
 
         # Log loss
         if it % args.log_interval == 0:
