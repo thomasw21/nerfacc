@@ -320,7 +320,7 @@ def render_images(
                 # Select only visible segments
                 # Query sigma without gradients
                 ray_indices = unpack_info(packed_info)
-                sigmas = sigma_fn(t_starts, t_ends, ray_indices.long()).squeeze(-1)
+                sigmas = sigma_fn(t_starts, t_ends, ray_indices.long())
                 alphas = 1.0 - torch.exp(-sigmas * (t_ends - t_starts))
                 # TODO @thomasw21: Reduce significantly the number of samples on that ray.
                 packed_info, t_starts, t_ends = nerfacc.ray_resampling(
