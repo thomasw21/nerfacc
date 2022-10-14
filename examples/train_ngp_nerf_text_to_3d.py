@@ -315,7 +315,7 @@ def render_images(
                 stratified=True
             )
 
-            if rays_resample:
+            if ray_resample:
                 # Select only visible segments
                 # Query sigma without gradients
                 ray_indices = unpack_info(packed_info)
