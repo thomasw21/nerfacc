@@ -345,8 +345,8 @@ def render_images(
                 visibility, packed_info_visible = render_visibility(
                     packed_info,
                     alphas,
-                    early_stop_eps=1e-4,
-                    alpha_thre=1e-4
+                    # early_stop_eps=1e-4,
+                    # alpha_thre=1e-4
                 )
                 t_starts, t_ends = t_starts[visibility], t_ends[visibility]
                 packed_info = packed_info_visible
@@ -379,7 +379,7 @@ def data_augment(
     color: torch.Tensor,
     opacity: torch.Tensor,
     # TODO @thomasw21: Make random background color accessible through CLI
-    background: Optional[Background] = None,
+    backgrounds: Optional[List[Optional[Background]]] = None,
     blur_background: bool = True
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     N, H, W, _ = color.shape
@@ -398,45 +398,51 @@ def data_augment(
     opacity = img[-1:].permute(1, 2, 3, 0)
 
     # Background
-    if background is not None:
-        # Single colored background
-        if background is background.RANDOM_COLOR_UNIFORM_BACKGROUND:
-            background_color = torch.rand(N, 1, 1, 3, device=color.device)
-        elif background is background.RANDOM_COLOR_BACKGROUND:
-            background_color = torch.rand(N, H, W, 3, device=color.device)
-        elif background is background.RANDOM_TEXTURE:
-            raise NotImplementedError
-        elif background is background.CHECKERBOARD:
-            # https://github.com/google-research/google-research/blob/4f54cade26f40728be7fda05c89011f89b7b7b7f/dreamfields/experiments/diffusion_3d/augment.py#L40
-            nsq_x = 8
-            nsq_y = 8
-            assert H % nsq_x == 0
-            assert W % nsq_y == 0
-            sq_x = H // nsq_x
-            sq_y = W // nsq_y
-            color1, color2 = torch.rand(2, N, 3, device=color.device)
-            background_color = color1[:, None, None, :].repeat(1, H, W, 1).view(N, nsq_x, sq_x, nsq_y, sq_y, 3)
-            background_color[:, ::2, :, 1::2, :, :] = color2[:, None, None, None, None, :]
-            background_color[:, 1::2, :, ::2, :, :] = color2[:, None, None, None, None, :]
-            background_color = background_color.view(N, H, W, 3)
-        elif background is background.WHITE:
-            background_color = torch.ones(1, 1, 1, 1, device=color.device)
-        elif background is background.BLACK:
-            background_color = torch.zeros(1, 1, 1, 1, device=color.device)
-        else:
-            raise ValueError
+    if backgrounds is not None:
+        background_colors = torch.empty_like(color)
+        for i, background in enumerate(backgrounds):
+            # Single colored background
+            if background is None:
+                background_color = color[i]
+            elif background is background.RANDOM_COLOR_UNIFORM_BACKGROUND:
+                background_color = torch.rand(1, 1, 3, device=color.device)
+            elif background is background.RANDOM_COLOR_BACKGROUND:
+                background_color = torch.rand(H, W, 3, device=color.device)
+            elif background is background.RANDOM_TEXTURE:
+                raise NotImplementedError
+            elif background is background.CHECKERBOARD:
+                # https://github.com/google-research/google-research/blob/4f54cade26f40728be7fda05c89011f89b7b7b7f/dreamfields/experiments/diffusion_3d/augment.py#L40
+                nsq_x = 8
+                nsq_y = 8
+                assert H % nsq_x == 0
+                assert W % nsq_y == 0
+                sq_x = H // nsq_x
+                sq_y = W // nsq_y
+                color1, color2 = torch.rand(2, 3, device=color.device)
+                background_color = color1[None, None, :].repeat(H, W, 1).view(nsq_x, sq_x, nsq_y, sq_y, 3)
+                background_color[::2, :, 1::2, :, :] = color2[:, None, None, None, None, :]
+                background_color[1::2, :, ::2, :, :] = color2[:, None, None, None, None, :]
+                background_color = background_color.view(N, H, W, 3)
+            elif background is background.WHITE:
+                background_color = torch.ones(1, 1, 1, device=color.device)
+            elif background is background.BLACK:
+                background_color = torch.zeros(1, 1, 1, device=color.device)
+            else:
+                raise ValueError
 
-        if blur_background:
-            min_blur, max_blur = (0.0, 10.)
-            sigma_x, sigma_y = np.random.rand(2) * (max_blur - min_blur) + min_blur
-            background_color = F.gaussian_blur(
-                torch.broadcast_to(background_color, (N, H, W, 3)).permute(0, 3, 1, 2),
-                kernel_size=[15, 15],
-                # Weird, but it's in dreamfields https://github.com/google-research/google-research/blob/00392d6e3bd30bfe706859287035fcd8d53a010b/dreamfields/dreamfields/config/config_base.py#L130
-                sigma=[sigma_x, sigma_y]
-            ).permute(0, 2, 3, 1)
+            if blur_background:
+                min_blur, max_blur = (0.0, 10.)
+                sigma_x, sigma_y = np.random.rand(2) * (max_blur - min_blur) + min_blur
+                background_color = F.gaussian_blur(
+                    torch.broadcast_to(background_color, (H, W, 3)).permute(2, 0, 1),
+                    kernel_size=[15, 15],
+                    # Weird, but it's in dreamfields https://github.com/google-research/google-research/blob/00392d6e3bd30bfe706859287035fcd8d53a010b/dreamfields/dreamfields/config/config_base.py#L130
+                    sigma=[sigma_x, sigma_y]
+                ).permute(1, 2, 0)
 
-        color = color * opacity + background_color * (1 - opacity)
+            background_colors[i] = background_color
+
+        color = color * opacity + background_colors * (1 - opacity)
 
     return color, opacity
 
@@ -558,7 +564,15 @@ def main():
 
         # Augment images
         # TODO @thomasw21 change background for each image and not for each batch
-        images, opacities = data_augment(images, opacities, background=choices(training_backgrounds, weights=[training_background_probs[bkd] for bkd in training_backgrounds])[0])
+        images, opacities = data_augment(
+            images,
+            opacities,
+            backgrounds=choices(
+                training_backgrounds,
+                weights=[training_background_probs[bkd] for bkd in training_backgrounds],
+                k=args.batch_size
+            )
+        )
 
         # Discriminate images with text
         images = images.permute(0, 3, 1, 2) # [B, H, W, C] -> [B, C, H, W]
@@ -630,7 +644,11 @@ def main():
             tensor=images.permute(0, 3, 1, 2), #channel first
             fp=args.save_images_path,
         )
-        images, opacities = data_augment(color=images, opacity=opacities, background=Background.WHITE)
+        images, opacities = data_augment(
+            color=images,
+            opacity=opacities,
+            backgrounds=[Background.WHITE for _ in range(len(images))]
+        )g
         save_image(
             tensor=images.permute(0, 3, 1, 2),
             fp=args.save_images_path.parent / f"{args.save_images_path.stem}_aug{args.save_images_path.suffix}"
