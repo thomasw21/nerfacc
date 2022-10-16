@@ -77,6 +77,16 @@ class TextImageDiscriminator(nn.Module):
         self.image_processor = CLIPProcessor.from_pretrained(model_name)
         self.config = AutoConfig.from_pretrained(model_name)
 
+        assert self.image_processor.feature_extractor.do_normalize
+        self.register_buffer(
+            "image_mean",
+            torch.tensor(self.image_processor.feature_extractor.image_mean)
+        )
+        self.register_buffer(
+            "image_std",
+            torch.tensor(self.image_processor.feature_extractor.image_std)
+        )
+
     def forward(self, encoded_images: torch.Tensor, encoded_texts: torch.Tensor) -> torch.Tensor:
 
         ### Copied form `modeling_clip.py`
@@ -106,6 +116,10 @@ class TextImageDiscriminator(nn.Module):
         assert images.shape[1] == 3, "RGB images"
         # TODO @thomasw21: This is non differentiable ...
         # inputs = self.image_processor(images=images, return_tensors="pt")
+
+        # normalize image
+        images = (images - self.image_mean[None, :, None, None]) / self.image_std[None, :, None, None]
+
         inputs = {"pixel_values": images}
         return self.model.get_image_features(**inputs)
 
