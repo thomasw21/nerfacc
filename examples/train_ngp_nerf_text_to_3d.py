@@ -654,7 +654,7 @@ def main():
         sublosses = [- mean_score]
         if args.lambda_transmittance_loss > 0:
             sublosses.append(
-                - args.lambda_transmittance_loss * torch.clamp(1 - opacities.mean(), max=args.transmittance_loss_ceil)
+                - args.lambda_transmittance_loss * torch.mean(torch.clamp(1 - torch.mean(opacities, (1,2)), max=args.transmittance_loss_ceil))
             )
 
         # Compute entropy
