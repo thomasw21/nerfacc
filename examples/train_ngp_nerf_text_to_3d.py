@@ -41,6 +41,7 @@ def get_args():
     parser.add_argument("--use-viewdirs", action="store_true", help="Whether the model use view dir in order to generate voxel color")
     parser.add_argument("--track-scene-origin-decay", type=float, default=0.999, help="Track scene origin with decay")
     parser.add_argument("--training-thetas", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[60, 90], help="Elevation angle you're training at")
+    parser.add_argument("--use-occupancy-grid", action="store_true")
     parser.add_argument("--training-phis", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[0, 360], help="Around the lattitude you're training at")
     parser.add_argument("--validation-thetas", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[45,45], help="Elevation angle you're validatin at")
     parser.add_argument("--validation-phis", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[0, 360], help="Around the lattitude you're validating at")
@@ -299,7 +300,8 @@ def get_rgb_sigma_fn(
 def render_images(
     radiance_field: nn.Module,
     query_density: Callable[[torch.Tensor], torch.Tensor],
-    occupancy_grid: OccupancyGrid,
+    occupancy_grid: Optional[OccupancyGrid],
+    aabb: Optional[torch.Tensor],
     image_height: int,
     image_width: int,
     sensors: Sensors,
@@ -309,6 +311,11 @@ def render_images(
     device = sensors[0].device
     camera_rotations, camera_centers, camera_intrinsics = sensors
     N = camera_rotations.shape[0]
+    if occupancy_grid is not None:
+        assert aabb is None
+        aabb = occupancy_grid.roi_aabb
+    else:
+        assert aabb is not None
 
     # Compute which rays we should run
     # # We for now compute the center of each pixel, thus the 0.5
@@ -347,7 +354,7 @@ def render_images(
                 rays_o=origins_shard,
                 rays_d=view_dirs_shard,
                 sigma_fn=None,
-                scene_aabb=occupancy_grid.roi_aabb, # TODO @thomasw21: Need to pass it down otherwise this is going to be hell
+                scene_aabb=aabb, # TODO @thomasw21: Need to pass it down otherwise this is going to be hell
                 grid=occupancy_grid, # This is fucked
                 # near_plane=0.2,
                 # far_plane=1.0,
@@ -532,11 +539,16 @@ def main():
         params.requires_grad = False
 
     # Mechanism in order to have sparsity: Saves a bunch of compute
-    occupancy_grid = OccupancyGrid(
-        roi_aabb=args.aabb,
-        resolution=args.grid_resolution,
-        contraction_type=ContractionType.AABB,
-    ).to(device)
+    if args.use_occupancy_grid:
+        occupancy_grid = OccupancyGrid(
+            roi_aabb=args.aabb,
+            resolution=args.grid_resolution,
+            contraction_type=ContractionType.AABB,
+        ).to(device)
+        aabb = None # It's already stored in `occupancy_grid`
+    else:
+        occupancy_grid = None
+        aabb = torch.tensor(args.aabb, device=device)
     scene_origin = torch.tensor([0., 0., 0.], device=device)
 
     # Precompute all text embeddings
@@ -590,7 +602,7 @@ def main():
         # Update sparse occupancy matrix every n steps
         # Essentially there's a bunch of values that I don't care about since I can just set them to zero once and for all
         # We update the scene origin as well
-        if args.update_occupancy_grid_interval != 0 and it % args.update_occupancy_grid_interval == 0:
+        if args.use_occupancy_grid and args.update_occupancy_grid_interval != 0 and it % args.update_occupancy_grid_interval == 0:
             # TODO @thomasw21: we're not using their official API, though I'm more than okay with this
             occupancy_grid._update(
                 step=it,
@@ -614,6 +626,7 @@ def main():
             radiance_field,
             query_density=radiance_field.query_density,
             occupancy_grid=occupancy_grid,
+            aabb=aabb,
             image_height=image_height,
             image_width=image_width,
             sensors=sensors,
@@ -714,6 +727,7 @@ def main():
             query_density=radiance_field.query_density,
             # TODO @thomasw21: Check if I should actually feed the `occupancy_grid` or just rely on `query_density`
             occupancy_grid=occupancy_grid,
+            aabb=aabb,
             image_height=256,
             image_width=256,
             sensors=(R, C, K),
