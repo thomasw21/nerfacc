@@ -40,10 +40,10 @@ def get_args():
     parser.add_argument("--ray-resample-in-training", action="store_true")
     parser.add_argument("--use-viewdirs", action="store_true", help="Whether the model use view dir in order to generate voxel color")
     parser.add_argument("--track-scene-origin-decay", type=float, default=0.999, help="Track scene origin with decay")
-    parser.add_argument("--training-thetas", type=lambda x: tuple(float(elt) for elt in x), default=[60, 90], help="Elevation angle you're training at")
-    parser.add_argument("--training-phis", type=lambda x: tuple(float(elt) for elt in x), default=[0, 360], help="Around the lattitude you're training at")
-    parser.add_argument("--validation-thetas", type=lambda x: tuple(float(elt) for elt in x), default=[45,45], help="Elevation angle you're validatin at")
-    parser.add_argument("--validation-phis", type=lambda x: tuple(float(elt) for elt in x), default=[0, 360], help="Around the lattitude you're validating at")
+    parser.add_argument("--training-thetas", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[60, 90], help="Elevation angle you're training at")
+    parser.add_argument("--training-phis", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[0, 360], help="Around the lattitude you're training at")
+    parser.add_argument("--validation-thetas", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[45,45], help="Elevation angle you're validatin at")
+    parser.add_argument("--validation-phis", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[0, 360], help="Around the lattitude you're validating at")
 
     ### Optimizer
     # See DreamFields paper
