@@ -39,6 +39,7 @@ def get_args():
     parser.add_argument("--unbounded", action="store_true", help="whether to use unbounded rendering")
     parser.add_argument("--update-occupancy-grid-interval", type=int, default=16, help="Update occupancy grid every n steps")
     parser.add_argument("--ray-resample-in-training", action="store_true")
+    parser.add_argument("--use-viewdirs", action="store_true", help="Whether the model use view dir in order to generate voxel color")
     parser.add_argument("--training-thetas", type=lambda x: tuple(float(elt) for elt in x), default=[60, 90], help="Elevation angle you're training at")
     parser.add_argument("--training-phis", type=lambda x: tuple(float(elt) for elt in x), default=[0, 360], help="Around the lattitude you're training at")
     parser.add_argument("--validation-thetas", type=lambda x: tuple(float(elt) for elt in x), default=[45,45], help="Elevation angle you're validatin at")
@@ -504,6 +505,7 @@ def main():
     radiance_field = NGPradianceField(
         aabb=args.aabb,
         unbounded=args.unbounded,
+        use_viewdirs=args.use_viewdirs
     ).to(device)
     # Load pretrained weights
     if args.load_model_path is not None:
