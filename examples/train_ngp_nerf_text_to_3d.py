@@ -61,6 +61,8 @@ def get_args():
 
     ### Logging
     parser.add_argument("--log-interval", type=int, default=100, help="Log every n steps")
+    parser.add_argument("--validation-interval", type=int, default=500, help="Log validation every n steps")
+
 
     args = parser.parse_args()
     args.grid_resolution = 128
@@ -707,6 +709,59 @@ def main():
             )
             nb_iterations_for_time_estimation = 0
             start_time = time.time()
+
+        # Validation loss
+        if it != 0 and it % args.validation_interval == 0:
+            # TODO @thomasw21: FACTORISE THIS!!!
+            with torch.no_grad():
+                thetas, phis = generate_random_angles(
+                    8,
+                    device=device,
+                    stochastic_angles=True,
+                    theta_range=args.validation_thetas,
+                    phi_range=args.validation_phis
+                )
+
+                R, C, K = generate_sensors(
+                    image_height=image_height,
+                    image_width=image_width,
+                    thetas=thetas,
+                    phis=phis,
+                    scene_origin=scene_origin
+                )
+                images, opacities, _ = render_images(
+                    radiance_field,
+                    query_density=radiance_field.query_density,
+                    # TODO @thomasw21: Check if I should actually feed the `occupancy_grid` or just rely on `query_density`
+                    occupancy_grid=occupancy_grid,
+                    aabb=aabb,
+                    image_height=image_height,
+                    image_width=image_width,
+                    sensors=(R, C, K),
+                    stratified=False
+                )
+
+                ### Compute loss
+                channel_first_images = images.permute(0, 3, 1, 2)
+                resized_channel_first_images = F.resize(channel_first_images, [224, 224])
+                encoded_texts = torch.stack([
+                    text_to_encodings[prompter.get_camera_view_prompt(phi)]
+                    for phi in phis
+                ])
+                encoded_images = text_image_discriminator.encode_images(
+                    resized_channel_first_images,
+                    encoded_texts=encoded_texts
+                )
+                scores = text_image_discriminator(encoded_images=encoded_images, encoded_texts=encoded_texts)
+                mean_score = scores.mean()
+
+            print("##### validation")
+            print(
+                f"iteration: {it}/{args.iterations}| "
+                f"text/image score: {mean_score.detach():6f} | "
+                f"opacity: {opacities.detach().mean():6f} | "
+            )
+            print("#####")
 
     # Save path
     save_model(radiance_field, args.save_model_path)
