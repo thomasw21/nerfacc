@@ -50,7 +50,8 @@ def get_args():
     ### Optimizer
     # See DreamFields paper
     parser.add_argument("--lambda-transmittance-loss", type=float, default=0.5)
-    parser.add_argument("--transmittance-loss-ceil", type=float, default=0.88)
+    parser.add_argument("--transmittance-loss-ceil-range", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=(0.5,0.9))
+    parser.add_argument("--transmittance-loss-ceil-exponential-annealing", type=int, default=500)
     # Dreamfusion Open source implementation
     parser.add_argument("--lambda-transmittance-entropy", type=float, default=1e-4)
     # Center loss, for all the sigmas to be close to 0
@@ -662,8 +663,11 @@ def main():
 
         sublosses = [- mean_score]
         if args.lambda_transmittance_loss > 0:
+            t = min(it / args.transmittance_loss_ceil_exponential_annealing_step, 1)
+            min_, max_ = args.transmittance_loss_ceil_range
+            transmittance_loss_ceil = np.exp(np.log(min_) * (1 - t) + np.log(max_) * t)
             sublosses.append(
-                - args.lambda_transmittance_loss * torch.mean(torch.clamp(1 - torch.mean(opacities, (1,2)), max=args.transmittance_loss_ceil))
+                - args.lambda_transmittance_loss * torch.mean(torch.clamp(1 - torch.mean(opacities, (1,2)), max=transmittance_loss_ceil))
             )
 
         # Compute entropy
