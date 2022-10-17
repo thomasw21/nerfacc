@@ -40,7 +40,7 @@ def get_args():
     parser.add_argument("--update-occupancy-grid-interval", type=int, default=16, help="Update occupancy grid every n steps")
     parser.add_argument("--ray-resample-in-training", action="store_true")
     parser.add_argument("--use-viewdirs", action="store_true", help="Whether the model use view dir in order to generate voxel color")
-    parser.add_argument("--track-scene-origin", action="store_true", help="Track scene origin with 0.999 as decay")
+    parser.add_argument("--track-scene-origin-decay", type=float, default=0.999, help="Track scene origin with decay")
     parser.add_argument("--training-thetas", type=lambda x: tuple(float(elt) for elt in x), default=[60, 90], help="Elevation angle you're training at")
     parser.add_argument("--training-phis", type=lambda x: tuple(float(elt) for elt in x), default=[0, 360], help="Around the lattitude you're training at")
     parser.add_argument("--validation-thetas", type=lambda x: tuple(float(elt) for elt in x), default=[45,45], help="Elevation angle you're validatin at")
@@ -680,9 +680,8 @@ def main():
         grad_scaler.update()
 
         # Update scene origin
-        if args.track_scene_origin:
-            decay = 0.999
-            scene_origin = decay * scene_origin + (1 - decay) * density_origin
+        if args.track_scene_origin_decay < 1:
+            scene_origin = args.track_scene_origin_decay * scene_origin + (1 - args.track_scene_origin_decay) * density_origin
 
         # Log loss
         if it % args.log_interval == 0:
@@ -693,7 +692,7 @@ def main():
                 f"text/image score: {mean_score.detach():6f} | "
                 f"opacity: {opacities.detach().mean():6f} | "
                 f"{f'entropy: {entropy:6f} | ' if args.lambda_transmittance_entropy > 0 else ''}"
-                f"{f'scene origin: {scene_origin} | ' if args.track_scene_origin else ''}"
+                f"scene origin: {scene_origin} | "
             )
             nb_iterations_for_time_estimation = 0
             start_time = time.time()
