@@ -328,7 +328,7 @@ def render_images(
         torch.arange(image_width, device=device) - camera_intrinsics[1, 2] + 0.5,
         indexing="ij",
     ) # [H, W]
-    # TODO @thomasw21: we can make rays more robust, typically each pixel is the sum of all the rays that go through that pixel
+    # TODO @thomasw21: sample from gaussian instead though it probably needs to be bounded.
     if stochastic_rays_through_pixels:
         x = x + torch.rand_like(x) - 0.5
         y = y + torch.rand_like(y) - 0.5
