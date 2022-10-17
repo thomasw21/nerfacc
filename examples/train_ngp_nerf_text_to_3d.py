@@ -749,7 +749,7 @@ def main():
         print(
             f"text/image score: {mean_score.detach():6f} | "
             f"opacity: {opacities.detach().mean():6f} | "
-            f"scene origin: {scene_origin:6f} | "
+            f"scene origin: {scene_origin} | "
         )
 
         ## Saving
