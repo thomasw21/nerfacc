@@ -38,6 +38,7 @@ def get_args():
     parser.add_argument("--unbounded", action="store_true", help="whether to use unbounded rendering")
     parser.add_argument("--update-occupancy-grid-interval", type=int, default=16, help="Update occupancy grid every n steps")
     parser.add_argument("--ray-resample-in-training", action="store_true")
+    parser.add_argument("--sochastic-rays-through-pixels", action="store_true", help="Flag to allow model to sample any ray that goes through the pixel")
     parser.add_argument("--use-viewdirs", action="store_true", help="Whether the model use view dir in order to generate voxel color")
     parser.add_argument("--track-scene-origin-decay", type=float, default=0.999, help="Track scene origin with decay")
     parser.add_argument("--training-thetas", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[60, 90], help="Elevation angle you're training at")
@@ -306,6 +307,7 @@ def render_images(
     image_width: int,
     sensors: Sensors,
     ray_resample: bool = False,
+    stochastic_rays_through_pixels: bool = False,
     stratified: bool = False,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     device = sensors[0].device
@@ -322,10 +324,14 @@ def render_images(
     # # Get help: https://www.cs.cmu.edu/~16385/s17/Slides/11.1_Camera_matrix.pdf
     assert camera_intrinsics[0,0] == camera_intrinsics[1,1], "focal needs to be the same in x and y"
     x, y = torch.meshgrid(
-        torch.arange(image_height, device=device) - camera_intrinsics[0, 2],
-        torch.arange(image_width, device=device) - camera_intrinsics[1, 2],
+        torch.arange(image_height, device=device) - camera_intrinsics[0, 2] + 0.5,
+        torch.arange(image_width, device=device) - camera_intrinsics[1, 2] + 0.5,
         indexing="ij",
     ) # [H, W]
+    # TODO @thomasw21: we can make rays more robust, typically each pixel is the sum of all the rays that go through that pixel
+    if stochastic_rays_through_pixels:
+        x = x + torch.rand_like(x) - 0.5
+        y = y + torch.rand_like(y) - 0.5
     pixel_position_in_camera = torch.stack([
         x,
         y,
@@ -631,6 +637,7 @@ def main():
             image_width=image_width,
             sensors=sensors,
             ray_resample=args.ray_resample_in_training,
+            stochastic_rays_through_pixels=args.sochastic_rays_through_pixels,
             stratified=True,
         )
 
