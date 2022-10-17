@@ -311,7 +311,7 @@ def render_images(
     sensors: Sensors,
     ray_resample: bool = False,
     stratified: bool = False,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     device = sensors[0].device
     camera_rotations, camera_centers, camera_intrinsics = sensors
     N = camera_rotations.shape[0]
@@ -716,9 +716,10 @@ def main():
             image_height=256,
             image_width=256,
             thetas=thetas,
-            phis=phis
+            phis=phis,
+            scene_origin=scene_origin
         )
-        images, opacities = render_images(
+        images, opacities, _ = render_images(
             radiance_field,
             query_density=radiance_field.query_density,
             # TODO @thomasw21: Check if I should actually feed the `occupancy_grid` or just rely on `query_density`
@@ -728,6 +729,26 @@ def main():
             sensors=(R, C, K),
             stratified=False
         )
+
+        ### Compute loss
+        encoded_texts = torch.stack([
+            text_to_encodings[prompter.get_camera_view_prompt(phi)]
+            for phi in phis
+        ])
+        images = images.permute(0, 3, 1, 2)  # [B, H, W, C] -> [B, C, H, W]
+        encoded_images = text_image_discriminator.encode_images(images, encoded_texts=encoded_texts)
+        scores = text_image_discriminator(encoded_images=encoded_images, encoded_texts=encoded_texts)
+        mean_score = scores.mean()
+
+        ### Logs
+        print("###### Evaluation ##########")
+        print(
+            f"text/image score: {mean_score.detach():6f} | "
+            f"opacity: {opacities.detach().mean():6f} | "
+            f"scene origin: {scene_origin:6f} | "
+        )
+
+        ## Saving
         print(f"Saving images to {args.save_images_path.absolute()}")
         save_image(
             tensor=images.permute(0, 3, 1, 2), #channel first
