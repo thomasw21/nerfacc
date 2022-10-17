@@ -71,7 +71,7 @@ class NGPradianceField(torch.nn.Module):
         aabb: Union[torch.Tensor, List[float]],
         num_dim: int = 3,
         use_viewdirs: bool = True,
-        density_activation: Callable = lambda x: trunc_exp(x - 1),
+        density_activation: Callable = lambda x: trunc_exp(x),
         unbounded: bool = False,
         geo_feat_dim: int = 15,
         n_levels: int = 16,
