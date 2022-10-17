@@ -38,7 +38,7 @@ def get_args():
     parser.add_argument("--unbounded", action="store_true", help="whether to use unbounded rendering")
     parser.add_argument("--update-occupancy-grid-interval", type=int, default=16, help="Update occupancy grid every n steps")
     parser.add_argument("--ray-resample-in-training", action="store_true")
-    parser.add_argument("--sochastic-rays-through-pixels", action="store_true", help="Flag to allow model to sample any ray that goes through the pixel")
+    parser.add_argument("--stochastic-rays-through-pixels", action="store_true", help="Flag to allow model to sample any ray that goes through the pixel")
     parser.add_argument("--use-viewdirs", action="store_true", help="Whether the model use view dir in order to generate voxel color")
     parser.add_argument("--track-scene-origin-decay", type=float, default=0.999, help="Track scene origin with decay")
     parser.add_argument("--training-thetas", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[60, 90], help="Elevation angle you're training at")
@@ -637,7 +637,7 @@ def main():
             image_width=image_width,
             sensors=sensors,
             ray_resample=args.ray_resample_in_training,
-            stochastic_rays_through_pixels=args.sochastic_rays_through_pixels,
+            stochastic_rays_through_pixels=args.stochastic_rays_through_pixels,
             stratified=True,
         )
 
