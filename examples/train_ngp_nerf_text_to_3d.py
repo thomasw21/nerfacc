@@ -40,6 +40,7 @@ def get_args():
     parser.add_argument("--update-occupancy-grid-interval", type=int, default=16, help="Update occupancy grid every n steps")
     parser.add_argument("--ray-resample-in-training", action="store_true")
     parser.add_argument("--use-viewdirs", action="store_true", help="Whether the model use view dir in order to generate voxel color")
+    parser.add_argument("--track-scene-origin", action="store_true", help="Track scene origin with 0.999 as decay")
     parser.add_argument("--training-thetas", type=lambda x: tuple(float(elt) for elt in x), default=[60, 90], help="Elevation angle you're training at")
     parser.add_argument("--training-phis", type=lambda x: tuple(float(elt) for elt in x), default=[0, 360], help="Around the lattitude you're training at")
     parser.add_argument("--validation-thetas", type=lambda x: tuple(float(elt) for elt in x), default=[45,45], help="Elevation angle you're validatin at")
@@ -190,6 +191,7 @@ def generate_sensors(
     image_width: int,
     thetas: torch.Tensor,
     phis: torch.Tensor,
+    scene_origin: Optional[torch.Tensor] = None,
 ) -> Sensors:
     N, = phis.shape
     device = phis.device
@@ -218,13 +220,16 @@ def generate_sensors(
     rot_phi[:, 0, 1] = -sin_phis
     rot_phi[:, 1, 1] = cos_phis
 
-    rotations = rot_phi @ rot_theta
+    rotations = rot_phi @ rot_theta # [N, 3, 3]
 
     # Origins
     radius = 2
     origins = \
-        rotations @ torch.tensor([0, 0, radius], device=device, dtype=dtype)
+        rotations @ torch.tensor([0, 0, radius], device=device, dtype=dtype) # [N, 3]
         # + torch.tensor([0.5, 0.5, 0.5], device=angles.device, dtype=angles.dtype) # origin of the bounding box is 0
+    if scene_origin is not None:
+        # origins was estimated to be in the center, we now shift it to be pointing towards the center of the scene
+        origins = origins + scene_origin[None, :]
 
     # Camera specific values
     camera_angle_x = 45 * np.pi / 180
@@ -325,6 +330,7 @@ def render_images(
         y,
         - camera_intrinsics[0, 0][None, None].expand(image_height, image_height)
     ], dim=-1) / camera_intrinsics[0,0] # [H, W, 3]
+    # Assume that the cameras are looking at the origin 0.
     directions = (camera_rotations[:, None, :, :] @ pixel_position_in_camera.view(1, image_height * image_width, 3, 1)).squeeze(-1) # [N, H, W, 3]
     # pixel_position_in_world = directions + C[:, None, None, :]
     view_dirs = (directions / torch.linalg.norm(directions, dim=-1)[..., None]).view(-1, 3) # [N * image_height * image_width, 3]
@@ -337,6 +343,8 @@ def render_images(
     # TODO @thomasw21: determine the chunk size
     chunk = 2**15
     results = []
+    sum_sigmas = 0
+    numerator = 0
     for i in range(0, N * image_height * image_width, chunk):
         origins_shard = origins[i: i + chunk]
         view_dirs_shard = view_dirs[i: i + chunk]
@@ -359,7 +367,7 @@ def render_images(
                 # Select only visible segments
                 # Query sigma without gradients
                 ray_indices = unpack_info(packed_info)
-                sigmas, _ = sigma_fn(t_starts, t_ends, ray_indices.long())
+                sigmas, positions = sigma_fn(t_starts, t_ends, ray_indices.long())
                 alphas = 1.0 - torch.exp(-sigmas * (t_ends - t_starts))
                 # TODO @thomasw21: Reduce significantly the number of samples on that ray.
                 packed_info, t_starts, t_ends = nerfacc.ray_resampling(
@@ -374,7 +382,7 @@ def render_images(
                 # Select only visible segments
                 # Query sigma without gradients
                 ray_indices = unpack_info(packed_info)
-                sigmas, _ = sigma_fn(t_starts, t_ends, ray_indices.long())
+                sigmas, positions = sigma_fn(t_starts, t_ends, ray_indices.long())
                 assert (
                         sigmas.shape == t_starts.shape
                 ), "sigmas must have shape of (N, 1)! Got {}".format(sigmas.shape)
@@ -390,7 +398,11 @@ def render_images(
                 t_starts, t_ends = t_starts[visibility], t_ends[visibility]
                 packed_info = packed_info_visible
 
-
+            # Estimated mean position
+            # TODO @thomasw21: I might need to device by len(sigmas)
+            # TODO @thomasw21: this estimation might compute mutliple times the values we deem visible, which might force the estimation to oversample
+            sum_sigmas += torch.sum(sigmas)
+            numerator += (positions * sigmas)
 
         # Differentiable Volumetric Rendering.
         # colors: (n_rays, 3). opacity: (n_rays, 1). depth: (n_rays, 1).
@@ -407,7 +419,9 @@ def render_images(
 
     color = torch.cat([elt[0] for elt in results], dim=0).view(N, image_height, image_width, 3)
     opacity = torch.cat([elt[1] for elt in results], dim=0).view(N, image_height, image_width, 1)
-    return color, opacity
+
+    density_origin = numerator / sum_sigmas
+    return color, opacity, density_origin
 
 class Background(Enum):
     RANDOM_COLOR_UNIFORM_BACKGROUND = 1
@@ -531,6 +545,7 @@ def main():
         resolution=args.grid_resolution,
         contraction_type=ContractionType.AABB,
     ).to(device)
+    scene_origin = torch.tensor([0., 0., 0.], device=device)
 
     # Precompute all text embeddings
     prompter = ViewDependentPrompter(args.text)
@@ -582,7 +597,8 @@ def main():
 
         # Update sparse occupancy matrix every n steps
         # Essentially there's a bunch of values that I don't care about since I can just set them to zero once and for all
-        if it % args.update_occupancy_grid_interval == 0:
+        # We update the scene origin as well
+        if args.update_occupancy_grid_interval != 0 and it % args.update_occupancy_grid_interval == 0:
             # TODO @thomasw21: we're not using their official API, though I'm more than okay with this
             occupancy_grid._update(
                 step=it,
@@ -599,9 +615,10 @@ def main():
             image_height=image_height,
             image_width=image_width,
             thetas=thetas,
-            phis=phis
+            phis=phis,
+            scene_origin=scene_origin
         )
-        images, opacities = render_images(
+        images, opacities, density_origin = render_images(
             radiance_field,
             query_density=radiance_field.query_density,
             occupancy_grid=occupancy_grid,
@@ -637,8 +654,9 @@ def main():
             )
 
         # Compute entropy
+        # Close to https://cs.github.com/google-research/google-research/blob/219754bb2a058329174353efc7141434d1fd500e/dreamfields/dreamfields/lib.py#L173
         if args.lambda_transmittance_entropy > 0:
-            clamped_opacities = torch.clamp(opacities, min=1e-5, max=1 - 1e-5)
+            clamped_opacities = torch.clamp(opacities, min=1e-6, max=1 - 1e-6)
             minus_clamped_opacities = 1 - clamped_opacities
             entropy = torch.mean( - clamped_opacities * torch.log(clamped_opacities) - minus_clamped_opacities * torch.log(minus_clamped_opacities))
             sublosses.append(
@@ -647,6 +665,9 @@ def main():
 
         # TODO @thomasw21: force everything to be at the center, or track sigmas center. and translate in the NeRF model
         if args.lambda_center_loss > 0:
+            # Sample point in occupancy_grid
+
+            # compute their sigma values
             raise NotImplementedError
 
         # Compute loss
@@ -658,6 +679,11 @@ def main():
         grad_scaler.step(optimizer)
         grad_scaler.update()
 
+        # Update scene origin
+        if args.track_scene_origin:
+            decay = 0.999
+            scene_origin = decay * scene_origin + (1 - decay) * density_origin
+
         # Log loss
         if it % args.log_interval == 0:
             print(
@@ -667,6 +693,7 @@ def main():
                 f"text/image score: {mean_score.detach():6f} | "
                 f"opacity: {opacities.detach().mean():6f} | "
                 f"{f'entropy: {entropy:6f} | ' if args.lambda_transmittance_entropy > 0 else ''}"
+                f"{f'scene origin: {scene_origin:6f} | ' if args.track_scene_origin else ''}"
             )
             nb_iterations_for_time_estimation = 0
             start_time = time.time()
