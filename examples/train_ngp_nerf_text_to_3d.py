@@ -51,7 +51,7 @@ def get_args():
     # See DreamFields paper
     parser.add_argument("--lambda-transmittance-loss", type=float, default=0.5)
     parser.add_argument("--transmittance-loss-ceil-range", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=(0.5,0.9))
-    parser.add_argument("--transmittance-loss-ceil-exponential-annealing", type=int, default=500)
+    parser.add_argument("--transmittance-loss-ceil-exponential-annealing-step", type=int, default=500)
     # Dreamfusion Open source implementation
     parser.add_argument("--lambda-transmittance-entropy", type=float, default=1e-4)
     # Center loss, for all the sigmas to be close to 0
