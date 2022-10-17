@@ -344,7 +344,7 @@ def render_images(
     chunk = 2**15
     results = []
     sum_sigmas = 0
-    numerator = 0
+    numerator = torch.tensor([0., 0., 0.], device=device, dtype=torch.float)
     for i in range(0, N * image_height * image_width, chunk):
         origins_shard = origins[i: i + chunk]
         view_dirs_shard = view_dirs[i: i + chunk]
@@ -402,7 +402,7 @@ def render_images(
             # TODO @thomasw21: I might need to device by len(sigmas)
             # TODO @thomasw21: this estimation might compute mutliple times the values we deem visible, which might force the estimation to oversample
             sum_sigmas += torch.sum(sigmas)
-            numerator += (positions * sigmas)
+            numerator += torch.sum(positions * sigmas, dim=0)
 
         # Differentiable Volumetric Rendering.
         # colors: (n_rays, 3). opacity: (n_rays, 1). depth: (n_rays, 1).
@@ -731,12 +731,16 @@ def main():
         )
 
         ### Compute loss
+        channel_first_images = images.permute(0, 3, 1, 2)
+        resized_channel_first_images = F.resize(channel_first_images, [224, 224])
         encoded_texts = torch.stack([
             text_to_encodings[prompter.get_camera_view_prompt(phi)]
             for phi in phis
         ])
-        images = images.permute(0, 3, 1, 2)  # [B, H, W, C] -> [B, C, H, W]
-        encoded_images = text_image_discriminator.encode_images(images, encoded_texts=encoded_texts)
+        encoded_images = text_image_discriminator.encode_images(
+            resized_channel_first_images,
+            encoded_texts=encoded_texts
+        )
         scores = text_image_discriminator(encoded_images=encoded_images, encoded_texts=encoded_texts)
         mean_score = scores.mean()
 
@@ -751,7 +755,7 @@ def main():
         ## Saving
         print(f"Saving images to {args.save_images_path.absolute()}")
         save_image(
-            tensor=images.permute(0, 3, 1, 2), #channel first
+            tensor=channel_first_images, #channel first
             fp=args.save_images_path,
         )
         images, opacities = data_augment(
