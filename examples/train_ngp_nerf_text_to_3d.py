@@ -19,7 +19,6 @@ from nerfacc import OccupancyGrid, ContractionType, unpack_info, render_visibili
 """
 TODOs:
  - Intermediary rendering to check that things are going well
- - Validation at another angle from training. 
 """
 
 def get_args():
@@ -116,8 +115,6 @@ class TextImageDiscriminator(nn.Module):
     def encode_images(self, images: torch.Tensor, encoded_texts: torch.Tensor):
         assert len(images) == encoded_texts.shape[0], f"Image: {images.shape}\nEncoded_texts: {encoded_texts.shape}"
         assert images.shape[1] == 3, "RGB images"
-        # TODO @thomasw21: This is non differentiable ...
-        # inputs = self.image_processor(images=images, return_tensors="pt")
 
         # normalize image
         images = (images - self.image_mean[None, :, None, None]) / self.image_std[None, :, None, None]
@@ -130,10 +127,7 @@ class TextImageDiscriminator(nn.Module):
         return self.config.vision_config.image_size, self.config.vision_config.image_size
 
 class ViewDependentPrompter:
-    """Update input text to condition on camera view
-
-    TODO @thomasw21: setup correctly the thing in order to obtain view dependent prompting
-    """
+    """Update input text to condition on camera view"""
 
     suffixes = ["front view", "side view", "back view", "side view"]
     def __init__(self, text: str):
@@ -255,12 +249,12 @@ def get_sigma_fn(
     query_density: Callable[[torch.Tensor], torch.Tensor],
     rays_o: torch.Tensor,
     rays_d: torch.Tensor,
-) -> Callable[[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor]:
+) -> Callable[[torch.Tensor, torch.Tensor, torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
     def sigma_fn(
         t_starts: torch.Tensor,
         t_ends: torch.Tensor,
         ray_indices: torch.Tensor
-    ) -> torch.Tensor:
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """ Query density values from a user-defined radiance field.
         :params t_starts: Start of the sample interval along the ray. (n_samples, 1).
         :params t_ends: End of the sample interval along the ray. (n_samples, 1).
@@ -280,12 +274,12 @@ def get_rgb_sigma_fn(
     radiance_field: nn.Module,
     rays_o: torch.Tensor,
     rays_d: torch.Tensor,
-) -> Callable[[torch.Tensor, torch.Tensor, torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
+) -> Callable[[torch.Tensor, torch.Tensor, torch.Tensor], Tuple[torch.Tensor, torch.Tensor,  torch.Tensor]]:
     def rgb_sigma_fn(
         t_starts: torch.Tensor,
         t_ends: torch.Tensor,
         ray_indices: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """ Query rgb and density values from a user-defined radiance field.
         :params t_starts: Start of the sample interval along the ray. (n_samples, 1).
         :params t_ends: End of the sample interval along the ray. (n_samples, 1).
@@ -369,7 +363,6 @@ def render_images(
                 ray_indices = unpack_info(packed_info)
                 sigmas, positions = sigma_fn(t_starts, t_ends, ray_indices.long())
                 alphas = 1.0 - torch.exp(-sigmas * (t_ends - t_starts))
-                # TODO @thomasw21: Reduce significantly the number of samples on that ray.
                 packed_info, t_starts, t_ends = nerfacc.ray_resampling(
                     packed_info=packed_info,
                     t_starts=t_starts,
@@ -440,7 +433,6 @@ def data_augment(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     N, H, W, _ = color.shape
     # Do random crop
-    # TODO @thomasw21: Adding a random crop would really increase data
     img = torch.cat([
         color.permute(3, 0, 1, 2),
         opacity.permute(3, 0, 1, 2)
@@ -602,7 +594,7 @@ def main():
             # TODO @thomasw21: we're not using their official API, though I'm more than okay with this
             occupancy_grid._update(
                 step=it,
-                # TODO @thomasw21: figure out what the correct step_size we use.
+                # TODO @thomasw21: figure out what the correct step_size we use. Has to be something more or less proportional to the grid resolution
                 occ_eval_fn=lambda x: radiance_field.query_density(x) * 1e-3,
                 occ_thre=0.01,
                 # at which point we consider, it proposes a weird binary thing where you're higher than the mean clamped with this threshold
@@ -630,7 +622,6 @@ def main():
         )
 
         # Augment images
-        # TODO @thomasw21 change background for each image and not for each batch
         images, opacities = data_augment(
             images,
             opacities,
