@@ -693,7 +693,7 @@ def main():
                 f"text/image score: {mean_score.detach():6f} | "
                 f"opacity: {opacities.detach().mean():6f} | "
                 f"{f'entropy: {entropy:6f} | ' if args.lambda_transmittance_entropy > 0 else ''}"
-                f"{f'scene origin: {scene_origin:6f} | ' if args.track_scene_origin else ''}"
+                f"{f'scene origin: {scene_origin} | ' if args.track_scene_origin else ''}"
             )
             nb_iterations_for_time_estimation = 0
             start_time = time.time()
