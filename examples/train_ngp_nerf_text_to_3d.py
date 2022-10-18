@@ -134,19 +134,23 @@ class TextImageDiscriminator(nn.Module):
 class ViewDependentPrompter:
     """Update input text to condition on camera view"""
 
-    suffixes = ["front view", "side view", "back view", "side view"]
+    theta_suffix = "overhead view"
+    phi_suffixes = ["front view", "side view", "back view", "side view"]
     def __init__(self, text: str):
         self.text = text
 
-    def get_camera_view_prompt(self, phi: float) -> str:
+    def get_camera_view_prompt(self, theta: float, phi: float) -> str:
         """Given a homogenous matrix, we return the updated prompt
 
         TODO @thomasw21: code a generic one using sensor instead of the angles
         """
+        if theta < 30:
+            return self.get_prompt(self.theta_suffix)
+
         quadrants = [30, 180, 210, 360]
-        assert len(self.suffixes) == len(quadrants)
+        assert len(self.phi_suffixes) == len(quadrants)
         assert quadrants[-1] == 360
-        for suffix, angle_limit in zip(self.suffixes, quadrants):
+        for suffix, angle_limit in zip(self.phi_suffixes, quadrants):
             if phi <= angle_limit:
                 return self.get_prompt(suffix)
 
@@ -154,7 +158,7 @@ class ViewDependentPrompter:
         return f"{self.text}, {suffix}"
 
     def get_all_text_prompts(self) -> List[str]:
-        return [self.get_prompt(suffix) for suffix in self.suffixes]
+        return [self.get_prompt(suffix) for suffix in (self.phi_suffixes + [self.theta_suffix])]
 
 @torch.no_grad()
 def generate_random_angles(
@@ -605,8 +609,8 @@ def main():
 
         # Generate a view dependent prompt
         encoded_texts = torch.stack([
-            text_to_encodings[prompter.get_camera_view_prompt(phi)]
-            for phi in phis]
+            text_to_encodings[prompter.get_camera_view_prompt(theta, phi)]
+            for theta, phi in zip(thetas, phis)]
         )
 
         # Update sparse occupancy matrix every n steps
@@ -749,8 +753,8 @@ def main():
                 ### Compute loss
                 channel_first_images = images.permute(0, 3, 1, 2)
                 encoded_texts = torch.stack([
-                    text_to_encodings[prompter.get_camera_view_prompt(phi)]
-                    for phi in phis
+                    text_to_encodings[prompter.get_camera_view_prompt(theta, phi)]
+                    for theta, phi in zip(thetas, phis)
                 ])
                 encoded_images = text_image_discriminator.encode_images(
                     channel_first_images,
@@ -804,8 +808,8 @@ def main():
         channel_first_images = images.permute(0, 3, 1, 2)
         resized_channel_first_images = F.resize(channel_first_images, [224, 224])
         encoded_texts = torch.stack([
-            text_to_encodings[prompter.get_camera_view_prompt(phi)]
-            for phi in phis
+            text_to_encodings[prompter.get_camera_view_prompt(theta, phi)]
+            for theta, phi in zip(thetas, phis)
         ])
         encoded_images = text_image_discriminator.encode_images(
             resized_channel_first_images,
