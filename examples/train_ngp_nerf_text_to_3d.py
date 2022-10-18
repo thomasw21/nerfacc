@@ -174,8 +174,8 @@ def generate_random_angles(
     min_phi, max_phi = phi_range
     if stochastic_angles:
         # TODO @thomasw21: Activate uniform sampling over sphere surface
-        # if np.random.rand() > 0.5:
-        if True:
+        if np.random.rand() > 0.5:
+        # if True:
             thetas = torch.rand(num_angles, device=device) * (max_theta - min_theta) + min_theta
             phis = torch.rand(num_angles, device=device) * (max_phi - min_phi) + min_phi
         else:
@@ -183,7 +183,7 @@ def generate_random_angles(
             # http://corysimon.github.io/articles/uniformdistn-on-sphere/
             cos_min_theta = np.cos(min_theta * torch.pi / 180)
             cos_max_theta = np.cos(max_theta * torch.pi / 180)
-            thetas = torch.acos(torch.rand(num_angles, device=device) * (cos_max_theta - cos_min_theta) + cos_min_theta ) * 180 / torch.pi
+            thetas = torch.acos(torch.rand(num_angles, device=device) * (cos_max_theta - cos_min_theta) + cos_min_theta) * 180 / torch.pi
             phis = torch.rand(num_angles, device=device) * (max_phi - min_phi) + min_phi
     else:
         if max_theta == min_theta:
