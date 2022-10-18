@@ -167,10 +167,10 @@ class NGPradianceField(torch.nn.Module):
         if self.original_sigma_offset != 0:
             density_before_activation = density_before_activation + self.original_sigma_offset
 
-        density = self.density_activation(density_before_activation)
-
         if self.spatial_density_bias:
-            density = density + 5 * torch.exp( - torch.sum(positions * positions, dim=-1) / 0.08)[..., None]
+            density_before_activation = density_before_activation + 5 * torch.exp( - torch.sum(positions * positions, dim=-1) / 0.08)[..., None]
+
+        density = self.density_activation(density_before_activation)
 
         density = density * selector[..., None]
         if return_feat:
