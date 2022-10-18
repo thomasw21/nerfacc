@@ -149,6 +149,7 @@ class NGPradianceField(torch.nn.Module):
             )
 
     def query_density(self, x, return_feat: bool = False):
+        positions = x
         if self.unbounded:
             x = contract_to_unisphere(x, self.aabb)
         else:
@@ -166,7 +167,7 @@ class NGPradianceField(torch.nn.Module):
         density = self.density_activation(density_before_activation + self.original_sigma_offset)
 
         if self.spatial_density_bias:
-            density = density + 0.5 * torch.exp( - torch.sum(x * x, dim=-1) / 0.08)
+            density = density + 0.5 * torch.exp( - torch.sum(positions * positions, dim=-1) / 0.08)[..., None]
 
         density = density * selector[..., None]
         if return_feat:
