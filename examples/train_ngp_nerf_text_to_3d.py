@@ -453,6 +453,60 @@ class Background(Enum):
     WHITE = 5
     BLACK = 6
 
+def add_background(
+    color: torch.Tensor,
+    opacity: torch.Tensor,
+    backgrounds: List[Optional[Background]],
+    blur_background: bool = True
+):
+    N, H, W, _ = color.shape
+
+    # Background
+    background_colors = torch.empty_like(color)
+    for i, background in enumerate(backgrounds):
+        # Single colored background
+        if background is None:
+            background_color = color[i]
+        elif background is background.RANDOM_COLOR_UNIFORM_BACKGROUND:
+            background_color = torch.rand(1, 1, 3, device=color.device)
+        elif background is background.RANDOM_COLOR_BACKGROUND:
+            background_color = torch.rand(H, W, 3, device=color.device)
+        elif background is background.RANDOM_TEXTURE:
+            raise NotImplementedError
+        elif background is background.CHECKERBOARD:
+            # https://github.com/google-research/google-research/blob/4f54cade26f40728be7fda05c89011f89b7b7b7f/dreamfields/experiments/diffusion_3d/augment.py#L40
+            nsq_x = 8
+            nsq_y = 8
+            assert H % nsq_x == 0
+            assert W % nsq_y == 0
+            sq_x = H // nsq_x
+            sq_y = W // nsq_y
+            color1, color2 = torch.rand(2, 3, device=color.device)
+            background_color = color1[None, None, :].repeat(H, W, 1).view(nsq_x, sq_x, nsq_y, sq_y, 3)
+            background_color[::2, :, 1::2, :, :] = color2[None, None, None, None, :]
+            background_color[1::2, :, ::2, :, :] = color2[None, None, None, None, :]
+            background_color = background_color.view(H, W, 3)
+        elif background is background.WHITE:
+            background_color = torch.ones(1, 1, 1, device=color.device)
+        elif background is background.BLACK:
+            background_color = torch.zeros(1, 1, 1, device=color.device)
+        else:
+            raise ValueError
+
+        if blur_background:
+            min_blur, max_blur = (0.0, 10.)
+            sigma_x, sigma_y = np.random.rand(2) * (max_blur - min_blur) + min_blur
+            background_color = F.gaussian_blur(
+                torch.broadcast_to(background_color, (H, W, 3)).permute(2, 0, 1),
+                kernel_size=[15, 15],
+                # Weird, but it's in dreamfields https://github.com/google-research/google-research/blob/00392d6e3bd30bfe706859287035fcd8d53a010b/dreamfields/dreamfields/config/config_base.py#L130
+                sigma=[sigma_x, sigma_y]
+            ).permute(1, 2, 0)
+
+        background_colors[i] = background_color
+
+    return color * opacity + background_colors * (1 - opacity)
+
 def data_augment(
     color: torch.Tensor,
     opacity: torch.Tensor,
@@ -474,52 +528,8 @@ def data_augment(
     color = img[:3].permute(1, 2, 3, 0)
     opacity = img[-1:].permute(1, 2, 3, 0)
 
-    # Background
     if backgrounds is not None:
-        background_colors = torch.empty_like(color)
-        for i, background in enumerate(backgrounds):
-            # Single colored background
-            if background is None:
-                background_color = color[i]
-            elif background is background.RANDOM_COLOR_UNIFORM_BACKGROUND:
-                background_color = torch.rand(1, 1, 3, device=color.device)
-            elif background is background.RANDOM_COLOR_BACKGROUND:
-                background_color = torch.rand(H, W, 3, device=color.device)
-            elif background is background.RANDOM_TEXTURE:
-                raise NotImplementedError
-            elif background is background.CHECKERBOARD:
-                # https://github.com/google-research/google-research/blob/4f54cade26f40728be7fda05c89011f89b7b7b7f/dreamfields/experiments/diffusion_3d/augment.py#L40
-                nsq_x = 8
-                nsq_y = 8
-                assert H % nsq_x == 0
-                assert W % nsq_y == 0
-                sq_x = H // nsq_x
-                sq_y = W // nsq_y
-                color1, color2 = torch.rand(2, 3, device=color.device)
-                background_color = color1[None, None, :].repeat(H, W, 1).view(nsq_x, sq_x, nsq_y, sq_y, 3)
-                background_color[::2, :, 1::2, :, :] = color2[None, None, None, None, :]
-                background_color[1::2, :, ::2, :, :] = color2[None, None, None, None, :]
-                background_color = background_color.view(H, W, 3)
-            elif background is background.WHITE:
-                background_color = torch.ones(1, 1, 1, device=color.device)
-            elif background is background.BLACK:
-                background_color = torch.zeros(1, 1, 1, device=color.device)
-            else:
-                raise ValueError
-
-            if blur_background:
-                min_blur, max_blur = (0.0, 10.)
-                sigma_x, sigma_y = np.random.rand(2) * (max_blur - min_blur) + min_blur
-                background_color = F.gaussian_blur(
-                    torch.broadcast_to(background_color, (H, W, 3)).permute(2, 0, 1),
-                    kernel_size=[15, 15],
-                    # Weird, but it's in dreamfields https://github.com/google-research/google-research/blob/00392d6e3bd30bfe706859287035fcd8d53a010b/dreamfields/dreamfields/config/config_base.py#L130
-                    sigma=[sigma_x, sigma_y]
-                ).permute(1, 2, 0)
-
-            background_colors[i] = background_color
-
-        color = color * opacity + background_colors * (1 - opacity)
+        color = add_background(color=color, opacity=opacity, backgrounds=backgrounds, blur_background=blur_background)
 
     return color, opacity
 
@@ -843,10 +853,11 @@ def main():
             tensor=channel_first_images, #channel first
             fp=args.save_images_path,
         )
-        images, opacities = data_augment(
+        images = add_background(
             color=images,
             opacity=opacities,
-            backgrounds=[Background.WHITE for _ in range(len(images))]
+            backgrounds=[Background.WHITE for _ in range(len(images))],
+            blur_background=False
         )
         save_image(
             tensor=images.permute(0, 3, 1, 2),
