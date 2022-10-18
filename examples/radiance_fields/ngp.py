@@ -76,6 +76,7 @@ class NGPradianceField(torch.nn.Module):
         geo_feat_dim: int = 15,
         n_levels: int = 16,
         log2_hashmap_size: int = 19,
+        original_sigma_offset: float = -1,
     ) -> None:
         super().__init__()
         if not isinstance(aabb, torch.Tensor):
@@ -84,6 +85,7 @@ class NGPradianceField(torch.nn.Module):
         self.num_dim = num_dim
         self.use_viewdirs = use_viewdirs
         self.density_activation = density_activation
+        self.original_sigma_offset = original_sigma_offset
         self.unbounded = unbounded
 
         self.geo_feat_dim = geo_feat_dim
@@ -160,7 +162,7 @@ class NGPradianceField(torch.nn.Module):
             x, [1, self.geo_feat_dim], dim=-1
         )
         density = (
-            self.density_activation(density_before_activation)
+            self.density_activation(density_before_activation + self.original_sigma_offset)
             * selector[..., None]
         )
         if return_feat:
