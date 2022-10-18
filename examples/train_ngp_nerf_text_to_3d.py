@@ -553,7 +553,7 @@ def main():
         unbounded=args.unbounded,
         use_viewdirs=args.use_viewdirs,
         # original_sigma_offset=1, # This is in order to force the model to be opaque at init, if I could I would update the weight directl
-        original_sigma_offset=-1,
+        original_sigma_offset=0,
         spatial_density_bias=True
     ).to(device)
     # Load pretrained weights
