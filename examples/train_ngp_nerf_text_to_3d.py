@@ -181,9 +181,9 @@ def generate_random_angles(
         else:
             # TODO @thomasw21: Something seems broken.
             # http://corysimon.github.io/articles/uniformdistn-on-sphere/
-            cos_min_theta = np.cos(min_theta)
-            cos_max_theta = np.cos(max_theta)
-            thetas = torch.acos(torch.rand(num_angles, device=device) * (cos_max_theta - cos_min_theta) + cos_min_theta )
+            cos_min_theta = np.cos(min_theta * torch.pi / 180)
+            cos_max_theta = np.cos(max_theta * torch.pi / 180)
+            thetas = torch.acos(torch.rand(num_angles, device=device) * (cos_max_theta - cos_min_theta) + cos_min_theta ) * 180 / torch.pi
             phis = torch.rand(num_angles, device=device) * (max_phi - min_phi) + min_phi
     else:
         if max_theta == min_theta:
