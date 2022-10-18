@@ -747,13 +747,12 @@ def main():
 
                 ### Compute loss
                 channel_first_images = images.permute(0, 3, 1, 2)
-                resized_channel_first_images = F.resize(channel_first_images, [224, 224])
                 encoded_texts = torch.stack([
                     text_to_encodings[prompter.get_camera_view_prompt(phi)]
                     for phi in phis
                 ])
                 encoded_images = text_image_discriminator.encode_images(
-                    resized_channel_first_images,
+                    channel_first_images,
                     encoded_texts=encoded_texts
                 )
                 scores = text_image_discriminator(encoded_images=encoded_images, encoded_texts=encoded_texts)
