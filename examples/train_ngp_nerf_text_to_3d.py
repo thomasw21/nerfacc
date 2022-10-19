@@ -416,7 +416,7 @@ def render_images(
                     packed_info,
                     alphas,
                     # early_stop_eps=1e-4,
-                    # alpha_thre=1e-4
+                    alpha_thre=1e-4
                 )
                 t_starts, t_ends = t_starts[visibility], t_ends[visibility]
                 packed_info = packed_info_visible
