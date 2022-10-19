@@ -394,12 +394,17 @@ def render_images(
                 # Query sigma without gradients
                 ray_indices = unpack_info(packed_info)
                 sigmas, positions = sigma_fn(t_starts, t_ends, ray_indices.long())
-                alphas = 1.0 - torch.exp(-sigmas * (t_ends - t_starts))
+                weights = nerfacc.render_weight_from_density(
+                    packed_info=packed_info,
+                    t_starts=t_starts,
+                    t_ends=t_ends,
+                    sigmas=sigmas
+                )
                 packed_info, t_starts, t_ends = nerfacc.ray_resampling(
                     packed_info=packed_info,
                     t_starts=t_starts,
                     t_ends=t_ends,
-                    weights=alphas.squeeze(-1),
+                    weights=weights,
                     n_samples=196,
                 )
             else:
