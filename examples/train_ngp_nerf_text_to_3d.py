@@ -249,7 +249,7 @@ def generate_sensors(
         torch.tensor(0)[None].expand(N),
         torch.tensor(0)[None].expand(N),
         radius,
-    ]).to(device=device, dtype=dtype)
+    ], dim=-1).to(device=device, dtype=dtype)
     origins = \
         torch.bmm(rotations, z[:, :, None]).squeeze(-1)  # [N, 3]
         # + torch.tensor([0.5, 0.5, 0.5], device=angles.device, dtype=angles.dtype) # origin of the bounding box is 0
