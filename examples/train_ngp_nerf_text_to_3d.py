@@ -237,12 +237,19 @@ def generate_sensors(
     rotations = rot_phi @ rot_theta # [N, 3, 3]
 
     # Origins
-    radius = 2 # DreamFields proportion
-    ratio_with_dream_fusion = np.sqrt(3 * 0.5 ** 2) / 1.4
-    radius = (np.random.rand(N,) * 0.5 + 1) * ratio_with_dream_fusion # DreamFusion
+    # radius = 2 # DreamFields proportion
+    # z = torch.tensor([0, 0, radius], device=device, dtype=dtype)
+    ratio_with_dream_fusion = np.sqrt(3 * 0.5 ** 2) / 1.4 # DreamFusion
+    radius = (torch.rand(N,) * 0.5 + 1) * ratio_with_dream_fusion
+    z = torch.stack([
+        torch.tensor(0)[None].expand(N),
+        torch.tensor(0)[None].expand(N),
+        radius,
+    ]).to(device=device, dtype=dtype)
     origins = \
-        rotations @ torch.tensor([0, 0, radius], device=device, dtype=dtype) # [N, 3]
+        rotations @ z  # [N, 3]
         # + torch.tensor([0.5, 0.5, 0.5], device=angles.device, dtype=angles.dtype) # origin of the bounding box is 0
+
     if scene_origin is not None:
         # origins was estimated to be in the center, we now shift it to be pointing towards the center of the scene
         origins = origins + scene_origin[None, :]
