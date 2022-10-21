@@ -41,8 +41,8 @@ def get_args():
     parser.add_argument("--stochastic-rays-through-pixels", action="store_true", help="Flag to allow model to sample any ray that goes through the pixel")
     parser.add_argument("--use-viewdirs", action="store_true", help="Whether the model use view dir in order to generate voxel color")
     parser.add_argument("--track-scene-origin-decay", type=float, default=0.999, help="Track scene origin with decay")
-    parser.add_argument("--training-thetas", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[60, 90], help="Elevation angle you're training at")
     parser.add_argument("--use-occupancy-grid", action="store_true")
+    parser.add_argument("--training-thetas", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[60, 90], help="Elevation angle you're training at")
     parser.add_argument("--training-phis", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[0, 360], help="Around the lattitude you're training at")
     parser.add_argument("--validation-thetas", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[45,45], help="Elevation angle you're validatin at")
     parser.add_argument("--validation-phis", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[0, 360], help="Around the lattitude you're validating at")
@@ -149,7 +149,7 @@ class ViewDependentPrompter:
         if theta < 30:
             return self.get_prompt(self.theta_suffix)
 
-        quadrants = [30, 180, 210, 360]
+        quadrants = [60, 180, 240, 360]
         assert len(self.phi_suffixes) == len(quadrants)
         assert quadrants[-1] == 360
         for suffix, angle_limit in zip(self.phi_suffixes, quadrants):
@@ -181,7 +181,6 @@ def generate_random_angles(
             thetas = torch.rand(num_angles, device=device) * (max_theta - min_theta) + min_theta
             phis = torch.rand(num_angles, device=device) * (max_phi - min_phi) + min_phi
         else:
-            # TODO @thomasw21: Something seems broken.
             # http://corysimon.github.io/articles/uniformdistn-on-sphere/
             cos_min_theta = np.cos(min_theta * torch.pi / 180)
             cos_max_theta = np.cos(max_theta * torch.pi / 180)
