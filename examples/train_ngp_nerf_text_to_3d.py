@@ -168,7 +168,7 @@ def generate_random_views(
     device: torch.device,
     theta_range: Tuple[float, float],
     phi_range: Tuple[float, float],
-    stochastic_views: bool = True
+    stochastic_views: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     # TODO @thomasw21: Interestingly this doesn't sample uniformily around the cirle (typically upsample regions around the poles)
     #  - To sample around the circle you need use normalized gaussian but otherwise I need to figure things out.
@@ -199,10 +199,10 @@ def generate_random_views(
     # Radius
     if stochastic_views:
         ratio_with_dream_fusion = np.sqrt(3 * 0.5 ** 2) / 1.4  # DreamFusion
-        radius = (torch.rand(num_views, ) * 0.5 + 1) * ratio_with_dream_fusion
+        radius = (torch.rand(num_views, device=device) * 0.5 + 1) * ratio_with_dream_fusion
     else:
         radius = torch.tensor(2, device=device, dtype=torch.float)[None].expand(num_views)
-    return thetas, phis, radius
+    return thetas, phis.to(device), radius
 
 
 Sensors = Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
@@ -641,18 +641,29 @@ def main():
         # generate a random camera view
         image_height, image_width = text_image_discriminator.image_height_width
 
-        thetas, phis, radius = generate_random_views(
-            num_views=args.batch_size,
-            device=device,
-            theta_range=args.training_thetas,
-            phi_range=args.training_phis,
-        )
+        with torch.no_grad():
+            thetas, phis, radius = generate_random_views(
+                num_views=args.batch_size,
+                device=torch.device("cpu"), # no need to to everything in GPU
+                theta_range=args.training_thetas,
+                phi_range=args.training_phis,
+            )
 
-        # Generate a view dependent prompt
-        encoded_texts = torch.stack([
-            text_to_encodings[prompter.get_camera_view_prompt(theta, phi)]
-            for theta, phi in zip(thetas, phis)]
-        )
+            # Generate a view dependent prompt
+            encoded_texts = torch.stack([
+                text_to_encodings[prompter.get_camera_view_prompt(theta, phi)]
+                for theta, phi in zip(thetas, phis)]
+            )
+
+            sensors = generate_sensors(
+                image_height=image_height,
+                image_width=image_width,
+                thetas=thetas,
+                phis=phis,
+                radius=radius,
+                scene_origin=scene_origin
+            )
+            sensors = tuple(elt.to(device) for elt in sensors)
 
         # Update sparse occupancy matrix every n steps
         # Essentially there's a bunch of values that I don't care about since I can just set them to zero once and for all
@@ -670,14 +681,6 @@ def main():
             )
 
         # Render image
-        sensors = generate_sensors(
-            image_height=image_height,
-            image_width=image_width,
-            thetas=thetas,
-            phis=phis,
-            radius=radius,
-            scene_origin=scene_origin
-        )
         images, opacities, density_origin = render_images(
             radiance_field,
             query_density=radiance_field.query_density,
@@ -765,7 +768,7 @@ def main():
             with torch.no_grad():
                 thetas, phis, radius = generate_random_views(
                     8,
-                    device=device,
+                    device=torch.device("cpu"),
                     stochastic_views=True,
                     theta_range=args.validation_thetas,
                     phi_range=args.validation_phis
@@ -787,7 +790,7 @@ def main():
                     aabb=aabb,
                     image_height=image_height,
                     image_width=image_width,
-                    sensors=(R, C, K),
+                    sensors=(R.to(device), C.to(device), K.to(device)),
                     stratified=False
                 )
 
@@ -820,7 +823,7 @@ def main():
     with torch.no_grad():
         thetas, phis, radius = generate_random_views(
             32,
-            device=device,
+            device=torch.device("cpu"),
             stochastic_views=False,
             theta_range=args.validation_thetas,
             phi_range=args.validation_phis
@@ -842,7 +845,7 @@ def main():
             aabb=aabb,
             image_height=256,
             image_width=256,
-            sensors=(R, C, K),
+            sensors=(R.to(device), C.to(device), K.to(device)),
             stratified=False
         )
 
