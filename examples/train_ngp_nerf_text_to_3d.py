@@ -604,7 +604,7 @@ def main():
     else:
         occupancy_grid = None
         aabb = torch.tensor(args.aabb, device=device)
-    scene_origin = torch.tensor([0., 0., 0.], device=device)
+    scene_origin = torch.tensor([0., 0., 0.], device="cpu")
 
     # Precompute all text embeddings
     prompter = ViewDependentPrompter(args.text)
@@ -746,7 +746,7 @@ def main():
 
         # Update scene origin
         if args.track_scene_origin_decay < 1:
-            scene_origin = args.track_scene_origin_decay * scene_origin + (1 - args.track_scene_origin_decay) * density_origin
+            scene_origin = args.track_scene_origin_decay * scene_origin.to("cpu") + (1 - args.track_scene_origin_decay) * density_origin
 
         # Log loss
         if it % args.log_interval == 0:
