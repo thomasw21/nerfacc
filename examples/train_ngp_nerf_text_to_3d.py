@@ -163,39 +163,46 @@ class ViewDependentPrompter:
         return [self.get_prompt(suffix) for suffix in (self.phi_suffixes + [self.theta_suffix])]
 
 @torch.no_grad()
-def generate_random_angles(
-    num_angles: int,
+def generate_random_views(
+    num_views: int,
     device: torch.device,
     theta_range: Tuple[float, float],
     phi_range: Tuple[float, float],
-    stochastic_angles: bool = True
-) -> Tuple[torch.Tensor, torch.Tensor]:
+    stochastic_views: bool = True
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     # TODO @thomasw21: Interestingly this doesn't sample uniformily around the cirle (typically upsample regions around the poles)
     #  - To sample around the circle you need use normalized gaussian but otherwise I need to figure things out.
     min_theta, max_theta = theta_range
     min_phi, max_phi = phi_range
-    if stochastic_angles:
+    if stochastic_views:
         # TODO @thomasw21: Activate uniform sampling over sphere surface
         if np.random.rand() > 0.5:
         # if True:
-            thetas = torch.rand(num_angles, device=device) * (max_theta - min_theta) + min_theta
-            phis = torch.rand(num_angles, device=device) * (max_phi - min_phi) + min_phi
+            thetas = torch.rand(num_views, device=device) * (max_theta - min_theta) + min_theta
+            phis = torch.rand(num_views, device=device) * (max_phi - min_phi) + min_phi
         else:
             # http://corysimon.github.io/articles/uniformdistn-on-sphere/
             cos_min_theta = np.cos(min_theta * torch.pi / 180)
             cos_max_theta = np.cos(max_theta * torch.pi / 180)
-            thetas = torch.acos(torch.rand(num_angles, device=device) * (cos_max_theta - cos_min_theta) + cos_min_theta) * 180 / torch.pi
-            phis = torch.rand(num_angles, device=device) * (max_phi - min_phi) + min_phi
+            thetas = torch.acos(torch.rand(num_views, device=device) * (cos_max_theta - cos_min_theta) + cos_min_theta) * 180 / torch.pi
+            phis = torch.rand(num_views, device=device) * (max_phi - min_phi) + min_phi
     else:
         if max_theta == min_theta:
-            thetas = torch.full((num_angles,), min_theta, device=device)
+            thetas = torch.full((num_views,), min_theta, device=device)
         else:
-            thetas = torch.arange(min_theta, max_theta, step=(max_theta - min_theta) / num_angles, device=device)
+            thetas = torch.arange(min_theta, max_theta, step=(max_theta - min_theta) / num_views, device=device)
         if min_phi == max_phi:
-            phis = torch.full((num_angles,), min_phi, device=device)
+            phis = torch.full((num_views,), min_phi, device=device)
         else:
-            phis = torch.arange(min_phi, max_phi, step=(max_phi - min_phi) / num_angles, device=device)
-    return thetas, phis
+            phis = torch.arange(min_phi, max_phi, step=(max_phi - min_phi) / num_views, device=device)
+
+    # Radius
+    if stochastic_views:
+        ratio_with_dream_fusion = np.sqrt(3 * 0.5 ** 2) / 1.4  # DreamFusion
+        radius = (torch.rand(num_views, ) * 0.5 + 1) * ratio_with_dream_fusion
+    else:
+        radius = torch.tensor(2, device=device, dtype=torch.float)[None].expand(num_views)
+    return thetas, phis, radius
 
 
 Sensors = Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
@@ -205,6 +212,7 @@ def generate_sensors(
     image_width: int,
     thetas: torch.Tensor,
     phis: torch.Tensor,
+    radius: torch.Tensor,
     scene_origin: Optional[torch.Tensor] = None,
 ) -> Sensors:
     N, = phis.shape
@@ -237,10 +245,6 @@ def generate_sensors(
     rotations = rot_phi @ rot_theta # [N, 3, 3]
 
     # Origins
-    # radius = 2 # DreamFields proportion
-    # z = torch.tensor([0, 0, radius], device=device, dtype=dtype)
-    ratio_with_dream_fusion = np.sqrt(3 * 0.5 ** 2) / 1.4 # DreamFusion
-    radius = (torch.rand(N,) * 0.5 + 1) * ratio_with_dream_fusion
     z = torch.stack([
         torch.tensor(0)[None].expand(N),
         torch.tensor(0)[None].expand(N),
@@ -637,8 +641,8 @@ def main():
         # generate a random camera view
         image_height, image_width = text_image_discriminator.image_height_width
 
-        thetas, phis = generate_random_angles(
-            num_angles=args.batch_size,
+        thetas, phis, radius = generate_random_views(
+            num_views=args.batch_size,
             device=device,
             theta_range=args.training_thetas,
             phi_range=args.training_phis,
@@ -671,6 +675,7 @@ def main():
             image_width=image_width,
             thetas=thetas,
             phis=phis,
+            radius=radius,
             scene_origin=scene_origin
         )
         images, opacities, density_origin = render_images(
@@ -758,10 +763,10 @@ def main():
         if it != 0 and it % args.validation_interval == 0:
             # TODO @thomasw21: FACTORISE THIS!!!
             with torch.no_grad():
-                thetas, phis = generate_random_angles(
+                thetas, phis, radius = generate_random_views(
                     8,
                     device=device,
-                    stochastic_angles=True,
+                    stochastic_views=True,
                     theta_range=args.validation_thetas,
                     phi_range=args.validation_phis
                 )
@@ -771,6 +776,7 @@ def main():
                     image_width=image_width,
                     thetas=thetas,
                     phis=phis,
+                    radius=radius,
                     scene_origin=scene_origin
                 )
                 images, opacities, _ = render_images(
@@ -812,10 +818,10 @@ def main():
     # Generate some sample images
     radiance_field.eval()
     with torch.no_grad():
-        thetas, phis = generate_random_angles(
+        thetas, phis, radius = generate_random_views(
             32,
             device=device,
-            stochastic_angles=False,
+            stochastic_views=False,
             theta_range=args.validation_thetas,
             phi_range=args.validation_phis
         )
@@ -825,6 +831,7 @@ def main():
             image_width=256,
             thetas=thetas,
             phis=phis,
+            radius=radius,
             scene_origin=scene_origin
         )
         images, opacities, _ = render_images(
