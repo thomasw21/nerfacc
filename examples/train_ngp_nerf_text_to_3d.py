@@ -584,8 +584,8 @@ def main():
     # TODO @thomasw21: Determine if we run tcnn.optimizers
     grad_scaler = torch.cuda.amp.GradScaler()
 
-    optimizer = torch.optim.AdamW(radiance_field.parameters(), lr=args.learning_rate)
-    # optimizer = torch.optim.Adam(radiance_field.parameters(), lr=args.learning_rate)
+    # optimizer = torch.optim.AdamW(radiance_field.parameters(), lr=args.learning_rate)
+    optimizer = torch.optim.Adam(radiance_field.parameters(), lr=args.learning_rate)
 
     # Image and text scorer
     text_image_discriminator = TextImageDiscriminator().to(device)
