@@ -201,7 +201,7 @@ def generate_random_views(
         ratio_with_dream_fusion = np.sqrt(3 * 0.5 ** 2) / 1.4  # DreamFusion
         radius = (torch.rand(num_views, device=device) * 0.5 + 1) * ratio_with_dream_fusion
     else:
-        radius = torch.tensor(2, device=device, dtype=torch.float)[None].expand(num_views)
+        radius = torch.tensor(1, device=device, dtype=torch.float)[None].expand(num_views)
     return thetas, phis.to(device), radius
 
 
@@ -530,6 +530,7 @@ def add_background(
 def data_augment(
     color: torch.Tensor,
     opacity: torch.Tensor,
+    resize_shape: Tuple[int,int],
     # TODO @thomasw21: Make random background color accessible through CLI
     backgrounds: Optional[List[Optional[Background]]] = None,
     blur_background: bool = True
@@ -542,7 +543,7 @@ def data_augment(
     ])
     transforms = torchvision.transforms.Compose([
         # DreamFields
-        torchvision.transforms.RandomResizedCrop(size=(H, W), scale=(0.80, 1.0))
+        torchvision.transforms.RandomResizedCrop(size=resize_shape, scale=(0.80, 1.0))
     ])
     img = transforms(img)
     color = img[:3].permute(1, 2, 3, 0)
@@ -639,7 +640,7 @@ def main():
         radiance_field.train()
 
         # generate a random camera view
-        image_height, image_width = text_image_discriminator.image_height_width
+        training_image_height, training_image_width = (64, 64)# text_image_discriminator.image_height_width
 
         with torch.no_grad():
             thetas, phis, radius = generate_random_views(
@@ -656,8 +657,8 @@ def main():
             )
 
             sensors = generate_sensors(
-                image_height=image_height,
-                image_width=image_width,
+                image_height=training_image_height,
+                image_width=training_image_width,
                 thetas=thetas,
                 phis=phis,
                 radius=radius,
@@ -686,8 +687,8 @@ def main():
             query_density=radiance_field.query_density,
             occupancy_grid=occupancy_grid,
             aabb=aabb,
-            image_height=image_height,
-            image_width=image_width,
+            image_height=training_image_height,
+            image_width=training_image_width,
             sensors=sensors,
             ray_resample=args.ray_resample_in_training,
             stochastic_rays_through_pixels=args.stochastic_rays_through_pixels,
@@ -698,6 +699,7 @@ def main():
         images, opacities = data_augment(
             images,
             opacities,
+            resize_shape=text_image_discriminator.image_height_width,
             backgrounds=choices(
                 training_backgrounds,
                 weights=[training_background_probs[bkd] for bkd in training_backgrounds],
@@ -766,6 +768,8 @@ def main():
         if it != 0 and it % args.validation_interval == 0:
             # TODO @thomasw21: FACTORISE THIS!!!
             with torch.no_grad():
+                image_height, image_width = text_image_discriminator.image_height_width
+
                 thetas, phis, radius = generate_random_views(
                     8,
                     device=torch.device("cpu"),

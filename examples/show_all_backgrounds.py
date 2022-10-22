@@ -12,7 +12,8 @@ def main():
             images_with_background[background] = data_augment(
                 color=original_image,
                 opacity=opacity_image,
-                background=background
+                resize_shape=(H,W),
+                backgrounds=[background]
             )[0]
         except NotImplementedError:
             # Ignore those that are not yet implemented
