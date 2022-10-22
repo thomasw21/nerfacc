@@ -202,7 +202,7 @@ def generate_random_views(
         radius = (torch.rand(num_views, device=device) * 0.5 + 1) * ratio_with_dream_fusion
     else:
         radius = torch.tensor(1, device=device, dtype=torch.float)[None].expand(num_views)
-    return thetas, phis.to(device), radius
+    return thetas, phis, radius
 
 
 Sensors = Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
@@ -640,7 +640,7 @@ def main():
         radiance_field.train()
 
         # generate a random camera view
-        training_image_height, training_image_width = (64, 64)# text_image_discriminator.image_height_width
+        training_image_height, training_image_width = text_image_discriminator.image_height_width # (64, 64) # text_image_discriminator.image_height_width
 
         with torch.no_grad():
             thetas, phis, radius = generate_random_views(
