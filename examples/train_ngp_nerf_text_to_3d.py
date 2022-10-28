@@ -44,8 +44,10 @@ def get_args():
     parser.add_argument("--use-occupancy-grid", action="store_true")
     parser.add_argument("--training-thetas", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[60, 90], help="Elevation angle you're training at")
     parser.add_argument("--training-phis", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[0, 360], help="Around the lattitude you're training at")
+    parser.add_argument("--train-resolution", type=lambda x: tuple(int(elt) for elt in x.split(",")), default=[168, 168], help="Image resolution to generate")
     parser.add_argument("--validation-thetas", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[45,45], help="Elevation angle you're validatin at")
     parser.add_argument("--validation-phis", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[0, 360], help="Around the lattitude you're validating at")
+    parser.add_argument("--validation-resolution", type=lambda x: tuple(int(elt) for elt in x.split(",")), default=[256, 256], help="Image resolution to generate")
 
     ### Optimizer
     # See DreamFields paper
@@ -396,7 +398,7 @@ def render_images(
                 # near_plane=0.2,
                 # far_plane=1.0,
                 # early_stop_eps=1e-4,
-                alpha_thre=1e-4, # nerfstudio uses 1e-4, default is 0.0
+                # alpha_thre=1e-4, # nerfstudio uses 1e-4, default is 0.0
                 stratified=stratified
             )
 
@@ -531,6 +533,7 @@ def data_augment(
     color: torch.Tensor,
     opacity: torch.Tensor,
     resize_shape: Tuple[int,int],
+    random_resize_crop: bool,
     # TODO @thomasw21: Make random background color accessible through CLI
     backgrounds: Optional[List[Optional[Background]]] = None,
     blur_background: bool = True
@@ -541,10 +544,16 @@ def data_augment(
         color.permute(3, 0, 1, 2),
         opacity.permute(3, 0, 1, 2)
     ])
-    transforms = torchvision.transforms.Compose([
-        # DreamFields
-        torchvision.transforms.RandomResizedCrop(size=resize_shape, scale=(0.80, 1.0))
-    ])
+    if random_resize_crop:
+        transforms = torchvision.transforms.Compose([
+            # DreamFields
+            torchvision.transforms.RandomResizedCrop(size=resize_shape, scale=(0.80, 1.0))
+        ])
+    else:
+        transforms = torchvision.transforms.Compose([
+            # DreamFields
+            torchvision.transforms.Resize(size=resize_shape)
+        ])
     img = transforms(img)
     color = img[:3].permute(1, 2, 3, 0)
     opacity = img[-1:].permute(1, 2, 3, 0)
@@ -640,7 +649,8 @@ def main():
         radiance_field.train()
 
         # generate a random camera view
-        training_image_height, training_image_width = text_image_discriminator.image_height_width # (64, 64) # text_image_discriminator.image_height_width
+        # training_image_height, training_image_width = text_image_discriminator.image_height_width
+        training_image_height, training_image_width = args.traning_resolution
 
         with torch.no_grad():
             thetas, phis, radius = generate_random_views(
@@ -648,6 +658,7 @@ def main():
                 device=torch.device("cpu"), # no need to to everything in GPU
                 theta_range=args.training_thetas,
                 phi_range=args.training_phis,
+                stochastic_views=True
             )
 
             # Generate a view dependent prompt
@@ -699,6 +710,7 @@ def main():
         images, opacities = data_augment(
             images,
             opacities,
+            random_resize_crop=True,
             resize_shape=text_image_discriminator.image_height_width,
             backgrounds=choices(
                 training_backgrounds,
@@ -768,7 +780,8 @@ def main():
         if it != 0 and it % args.validation_interval == 0:
             # TODO @thomasw21: FACTORISE THIS!!!
             with torch.no_grad():
-                image_height, image_width = text_image_discriminator.image_height_width
+                # image_height, image_width = text_image_discriminator.image_height_width
+                validation_image_height, validation_image_width = args.validation_resolution
 
                 thetas, phis, radius = generate_random_views(
                     8,
@@ -778,9 +791,10 @@ def main():
                     phi_range=args.validation_phis
                 )
 
+
                 R, C, K = generate_sensors(
-                    image_height=image_height,
-                    image_width=image_width,
+                    image_height=validation_image_height,
+                    image_width=validation_image_width,
                     thetas=thetas,
                     phis=phis,
                     radius=radius,
@@ -792,11 +806,22 @@ def main():
                     # TODO @thomasw21: Check if I should actually feed the `occupancy_grid` or just rely on `query_density`
                     occupancy_grid=occupancy_grid,
                     aabb=aabb,
-                    image_height=image_height,
-                    image_width=image_width,
+                    image_height=validation_image_height,
+                    image_width=validation_image_width,
                     sensors=(R.to(device), C.to(device), K.to(device)),
                     stratified=False
                 )
+
+                # Resize image to correct shape
+                images, opacities = data_augment(
+                    images,
+                    opacities,
+                    random_resize_crop=False,
+                    resize_shape=text_image_discriminator.image_height_width,
+                    backgrounds=None,
+                    blur_background=False
+                )
+
 
                 ### Compute loss
                 channel_first_images = images.permute(0, 3, 1, 2)
@@ -834,8 +859,8 @@ def main():
         )
         # TODO @thomasw21: define resolution
         R, C, K = generate_sensors(
-            image_height=256,
-            image_width=256,
+            image_height=args.validation_resolution[0],
+            image_width=args.validation_resolution[1],
             thetas=thetas,
             phis=phis,
             radius=radius,
@@ -847,15 +872,15 @@ def main():
             # TODO @thomasw21: Check if I should actually feed the `occupancy_grid` or just rely on `query_density`
             occupancy_grid=occupancy_grid,
             aabb=aabb,
-            image_height=256,
-            image_width=256,
+            image_height=args.validation_resolution[0],
+            image_width=args.validation_resolution[1],
             sensors=(R.to(device), C.to(device), K.to(device)),
             stratified=False
         )
 
         ### Compute loss
         channel_first_images = images.permute(0, 3, 1, 2)
-        resized_channel_first_images = F.resize(channel_first_images, [224, 224])
+        resized_channel_first_images = F.resize(channel_first_images, text_image_discriminator.image_height_width)
         encoded_texts = torch.stack([
             text_to_encodings[prompter.get_camera_view_prompt(theta, phi)]
             for theta, phi in zip(thetas, phis)
