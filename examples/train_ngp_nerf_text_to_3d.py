@@ -44,8 +44,8 @@ def get_args():
     parser.add_argument("--use-occupancy-grid", action="store_true")
     parser.add_argument("--training-thetas", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[60, 90], help="Elevation angle you're training at")
     parser.add_argument("--training-phis", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[0, 360], help="Around the lattitude you're training at")
-    parser.add_argument("--train-resolution", type=lambda x: tuple(int(elt) for elt in x.split(",")), default=[168, 168], help="Image resolution to generate")
-    parser.add_argument("--validation-thetas", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[45,45], help="Elevation angle you're validatin at")
+    parser.add_argument("--train-resolution", type=lambda x: tuple(int(elt) for elt in x.split(",")), default=[224, 224], help="Image resolution to generate")
+    parser.add_argument("--validation-thetas", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[45, 45], help="Elevation angle you're validatin at")
     parser.add_argument("--validation-phis", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[0, 360], help="Around the lattitude you're validating at")
     parser.add_argument("--validation-resolution", type=lambda x: tuple(int(elt) for elt in x.split(",")), default=[256, 256], help="Image resolution to generate")
 
@@ -70,14 +70,16 @@ def get_args():
 
 
     args = parser.parse_args()
-    args.grid_resolution = 128
+    if args.use_occupancy_grid:
+        assert False, "TODO @thomasw21: Figure out show to handle that frid resolution, with image resolution with rendering steps ..."
+        args.grid_resolution = 128
 
     args.save_model_path.parent.mkdir(parents=True, exist_ok=True)
     args.save_images_path.parent.mkdir(parents=True, exist_ok=True)
 
     return args
 
-class TextImageDiscriminator(nn.Module):
+class CLIPTextImageDiscriminator(nn.Module):
     """Clip based"""
     def __init__(self):
         super().__init__()
@@ -134,6 +136,7 @@ class TextImageDiscriminator(nn.Module):
     @property
     def image_height_width(self) -> Tuple[int, int]:
         return self.config.vision_config.image_size, self.config.vision_config.image_size
+
 
 class ViewDependentPrompter:
     """Update input text to condition on camera view"""
@@ -193,6 +196,7 @@ def generate_random_views(
             thetas = torch.full((num_views,), min_theta, device=device)
         else:
             thetas = torch.arange(min_theta, max_theta, step=(max_theta - min_theta) / num_views, device=device)
+
         if min_phi == max_phi:
             phis = torch.full((num_views,), min_phi, device=device)
         else:
@@ -435,7 +439,7 @@ def render_images(
                 # Compute visibility of the samples, and filter out invisible samples
                 visibility, packed_info_visible = render_visibility(
                     packed_info,
-                    alphas,
+                    alphas=alphas,
                     # early_stop_eps=1e-4,
                     alpha_thre=1e-4
                 )
@@ -582,7 +586,7 @@ def main():
         unbounded=args.unbounded,
         use_viewdirs=args.use_viewdirs,
         # original_sigma_offset=1, # This is in order to force the model to be opaque at init, if I could I would update the weight directl
-        original_sigma_offset=0,
+        original_sigma_offset=-1,
         spatial_density_bias=True
     ).to(device)
     # Load pretrained weights
@@ -597,7 +601,7 @@ def main():
     optimizer = torch.optim.Adam(radiance_field.parameters(), lr=args.learning_rate)
 
     # Image and text scorer
-    text_image_discriminator = TextImageDiscriminator().to(device)
+    text_image_discriminator = CLIPTextImageDiscriminator().to(device)
     # Freeze all CLIP weights.
     text_image_discriminator.eval()
     for name, params in text_image_discriminator.named_parameters():
@@ -746,7 +750,8 @@ def main():
 
         if args.lambda_opacity > 0:
             sublosses.append(
-                args.lambda_opacity * torch.mean(torch.sqrt(opacities ** 2 + 0.01))
+                # args.lambda_opacity * torch.mean(torch.sqrt(opacities ** 2 + 0.01))
+                args.lambda_opacity * torch.mean(opacities)
             )
 
         # Compute loss
@@ -786,7 +791,7 @@ def main():
                 thetas, phis, radius = generate_random_views(
                     8,
                     device=torch.device("cpu"),
-                    stochastic_views=True,
+                    stochastic_views=False,
                     theta_range=args.validation_thetas,
                     phi_range=args.validation_phis
                 )
@@ -809,6 +814,8 @@ def main():
                     image_height=validation_image_height,
                     image_width=validation_image_width,
                     sensors=(R.to(device), C.to(device), K.to(device)),
+                    stochastic_rays_through_pixels=False,
+                    ray_resample=False,
                     stratified=False
                 )
 
@@ -864,7 +871,7 @@ def main():
             thetas=thetas,
             phis=phis,
             radius=radius,
-            scene_origin=scene_origin
+            scene_origin=scene_origin,
         )
         images, opacities, _ = render_images(
             radiance_field,
@@ -875,6 +882,8 @@ def main():
             image_height=args.validation_resolution[0],
             image_width=args.validation_resolution[1],
             sensors=(R.to(device), C.to(device), K.to(device)),
+            stochastic_rays_through_pixels=False,
+            ray_resample=False,
             stratified=False
         )
 
