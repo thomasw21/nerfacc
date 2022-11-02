@@ -44,7 +44,7 @@ def get_args():
     parser.add_argument("--use-occupancy-grid", action="store_true")
     parser.add_argument("--training-thetas", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[60, 90], help="Elevation angle you're training at")
     parser.add_argument("--training-phis", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[0, 360], help="Around the lattitude you're training at")
-    parser.add_argument("--train-resolution", type=lambda x: tuple(int(elt) for elt in x.split(",")), default=[224, 224], help="Image resolution to generate")
+    parser.add_argument("--training-resolution", type=lambda x: tuple(int(elt) for elt in x.split(",")), default=[224, 224], help="Image resolution to generate")
     parser.add_argument("--validation-thetas", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[45, 45], help="Elevation angle you're validatin at")
     parser.add_argument("--validation-phis", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[0, 360], help="Around the lattitude you're validating at")
     parser.add_argument("--validation-resolution", type=lambda x: tuple(int(elt) for elt in x.split(",")), default=[256, 256], help="Image resolution to generate")
@@ -654,7 +654,7 @@ def main():
 
         # generate a random camera view
         # training_image_height, training_image_width = text_image_discriminator.image_height_width
-        training_image_height, training_image_width = args.traning_resolution
+        training_image_height, training_image_width = args.training_resolution
 
         with torch.no_grad():
             thetas, phis, radius = generate_random_views(
