@@ -42,6 +42,8 @@ class CLIPTextImageDiscriminator(TextImageDiscriminator):
         return - (encoded_texts * encoded_images).sum(-1)
         # return torch.acos((encoded_texts * encoded_images).sum(-1))
 
+    @property
+
     def device(self):
         return self.model.text_projection.weight.device
 
@@ -49,7 +51,6 @@ class CLIPTextImageDiscriminator(TextImageDiscriminator):
         inputs = self.tokenizer(texts, padding=True, return_tensors="pt").to(self.device)
         return self.model.get_text_features(**inputs)
 
-    @property
     def encode_images(self, images: torch.Tensor, encoded_texts: torch.Tensor):
         assert len(images) == encoded_texts.shape[0], f"Image: {images.shape}\nEncoded_texts: {encoded_texts.shape}"
         assert images.shape[1] == 3, "RGB images"
