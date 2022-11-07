@@ -420,7 +420,7 @@ def render_images(
 
         # Differentiable Volumetric Rendering.
         # colors: (n_rays, 3). opacity: (n_rays, 1). depth: (n_rays, 1).
-        rgb_sigma_fn = get_rgb_sigma_fn(radiance_field, rays_o=origins_shard, rays_d=view_dirs_shard, perturb=True)
+        rgb_sigma_fn = get_rgb_sigma_fn(radiance_field, rays_o=origins_shard, rays_d=view_dirs_shard, perturb=stratified)
         color, opacity, depth = nerfacc.rendering(
             rgb_sigma_fn=lambda *args: rgb_sigma_fn(*args)[:2],
             packed_info=packed_info,
