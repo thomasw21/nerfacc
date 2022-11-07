@@ -121,7 +121,7 @@ class NGPradianceField(torch.nn.Module):
             }
         )
 
-        self.mlp_base = tcnn.Encoding(
+        self.mlp_base = tcnn.Network(
             n_input_dims=self.encoder.n_output_dims,
             n_output_dims=1 + self.geo_feat_dim,
             network_config={
@@ -161,7 +161,7 @@ class NGPradianceField(torch.nn.Module):
             x = (x - aabb_min) / (aabb_max - aabb_min)
         selector = ((x > 0.0) & (x < 1.0)).all(dim=-1)
         x = (
-            self.mlp_base(x.view(-1, self.num_dim))
+            self.encoder(self.mlp_base(x.view(-1, self.num_dim)))
             .view(list(x.shape[:-1]) + [1 + self.geo_feat_dim])
             .to(x)
         )
