@@ -13,8 +13,8 @@ from torch import nn
 from torchvision.utils import save_image
 
 import nerfacc
-from examples.text_image_discriminator.clip import CLIPTextImageDiscriminator
-from examples.text_image_discriminator.sd import SDTextImageDiscriminator
+from text_image_discriminator.clip import CLIPTextImageDiscriminator
+from text_image_discriminator.sd import SDTextImageDiscriminator
 from nerfacc import OccupancyGrid, ContractionType, unpack_info, render_visibility
 
 """
