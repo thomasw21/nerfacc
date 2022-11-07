@@ -14,6 +14,7 @@ from torchvision.utils import save_image
 
 import nerfacc
 from examples.text_image_discriminator.clip import CLIPTextImageDiscriminator
+from examples.text_image_discriminator.sd import SDTextImageDiscriminator
 from nerfacc import OccupancyGrid, ContractionType, unpack_info, render_visibility
 
 """
@@ -29,6 +30,7 @@ def get_args():
     parser.add_argument("--save-images-path", type=Path, required=True, help="Where to save the images that we generate at the end")
 
     ### Training nerf configs
+    parser.add_argument("--text-image-discriminator", type=str, choices=["clip", "sd"], help="Determine which text/image discriminator to use.")
     parser.add_argument(
         "--aabb",
         type=lambda s: [float(item) for item in s.split(",")],
@@ -208,6 +210,7 @@ def generate_sensors(
         origins = origins + scene_origin[None, :]
 
     # Camera specific values
+    # TODO @thomasw21: define angle
     camera_angle_x = 45 * np.pi / 180
     ratio = image_width / image_height # make sure that the pixels are actually square
     focal_x = 0.5 * image_height / np.tan(0.5 * camera_angle_x)
@@ -414,6 +417,8 @@ def render_images(
     density_origin = numerator / sum_sigmas
     return color, opacity, density_origin
 
+
+
 class Background(Enum):
     RANDOM_COLOR_UNIFORM_BACKGROUND = 1
     RANDOM_COLOR_BACKGROUND = 2
@@ -483,8 +488,8 @@ def data_augment(
     resize_shape: Tuple[int,int],
     random_resize_crop: bool,
     # TODO @thomasw21: Make random background color accessible through CLI
-    backgrounds: Optional[List[Optional[Background]]] = None,
-    blur_background: bool = True
+    backgrounds: Optional[List[Optional[Background]]],
+    blur_background: bool,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     N, H, W, _ = color.shape
     # Do random crop
@@ -547,7 +552,12 @@ def main():
     optimizer = torch.optim.Adam(radiance_field.parameters(), lr=args.learning_rate)
 
     # Image and text scorer
-    text_image_discriminator = CLIPTextImageDiscriminator().to(device)
+    if args.text_image_discriminator == "clip":
+        text_image_discriminator = CLIPTextImageDiscriminator().to(device)
+    elif args.text_image_discriminator == "sd":
+        text_image_discriminator = SDTextImageDiscriminator().to(device)
+    else:
+        raise ValueError(f"Invalid choice of text image disciminator. Got: {args.text_image_discriminator}")
     # Freeze all CLIP weights.
     text_image_discriminator.eval()
     for name, params in text_image_discriminator.named_parameters():
@@ -613,7 +623,7 @@ def main():
 
             # Generate a view dependent prompt
             encoded_texts = torch.stack([
-                text_to_encodings[prompter.get_camera_view_prompt(theta, phi)]
+                text_to_encodings[prompter.get_camera_view_prompt(theta=theta, phi=phi)]
                 for theta, phi in zip(thetas, phis)]
             )
 
@@ -666,7 +676,8 @@ def main():
                 training_backgrounds,
                 weights=[training_background_probs[bkd] for bkd in training_backgrounds],
                 k=args.batch_size
-            )
+            ),
+            blur_background=True
         )
 
         # Discriminate images with text
@@ -730,6 +741,7 @@ def main():
         # Validation loss
         if it != 0 and it % args.validation_interval == 0:
             # TODO @thomasw21: FACTORISE THIS!!!
+            radiance_field.eval()
             with torch.no_grad():
                 # image_height, image_width = text_image_discriminator.image_height_width
                 validation_image_height, validation_image_width = args.validation_resolution
@@ -771,7 +783,12 @@ def main():
                     opacities,
                     random_resize_crop=False,
                     resize_shape=text_image_discriminator.image_height_width,
-                    backgrounds=None,
+                    # backgrounds=None,
+                    backgrounds=choices(
+                        training_backgrounds,
+                        weights=[training_background_probs[bkd] for bkd in training_backgrounds],
+                        k=len(images)
+                    ),
                     blur_background=False
                 )
 
@@ -779,7 +796,7 @@ def main():
                 ### Compute loss
                 channel_first_images = images.permute(0, 3, 1, 2)
                 encoded_texts = torch.stack([
-                    text_to_encodings[prompter.get_camera_view_prompt(theta, phi)]
+                    text_to_encodings[prompter.get_camera_view_prompt(theta=theta, phi=phi)]
                     for theta, phi in zip(thetas, phis)
                 ])
                 encoded_images = text_image_discriminator.encode_images(

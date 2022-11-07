@@ -13,7 +13,9 @@ def main():
                 color=original_image,
                 opacity=opacity_image,
                 resize_shape=(H,W),
-                backgrounds=[background]
+                random_resize_crop=False,
+                backgrounds=[background],
+                blur_background=True
             )[0]
         except NotImplementedError:
             # Ignore those that are not yet implemented
