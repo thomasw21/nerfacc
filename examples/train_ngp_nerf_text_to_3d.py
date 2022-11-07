@@ -137,15 +137,25 @@ def generate_random_views(
             thetas = torch.acos(torch.rand(num_views, device=device) * (cos_max_theta - cos_min_theta) + cos_min_theta) * 180 / torch.pi
             phis = torch.rand(num_views, device=device) * (max_phi - min_phi) + min_phi
     else:
+        assert num_views % 2 == 0
+        half_num_views = num_views // 2
         if max_theta == min_theta:
             thetas = torch.full((num_views,), min_theta, device=device)
         else:
-            thetas = torch.arange(min_theta, max_theta, step=(max_theta - min_theta) / num_views, device=device)
+            # We're going to make two full circles one descending on going up
+            thetas = torch.cat([
+                torch.arange(min_theta, max_theta, step=(max_theta - min_theta) / half_num_views, device=device),
+                torch.arange(max_theta, min_theta, step=(min_theta - max_theta) / half_num_views, device=device),
+            ])
 
         if min_phi == max_phi:
             phis = torch.full((num_views,), min_phi, device=device)
         else:
-            phis = torch.arange(min_phi, max_phi, step=(max_phi - min_phi) / num_views, device=device)
+            # We're going to make two full circles one descending on going up
+            phis = torch.cat([
+                torch.arange(min_phi, max_phi, step=(max_phi - min_phi) / half_num_views, device=device),
+                torch.arange(min_phi, max_phi, step=(max_phi - min_phi) / half_num_views, device=device),
+            ])
 
     # Radius
     if stochastic_views:
