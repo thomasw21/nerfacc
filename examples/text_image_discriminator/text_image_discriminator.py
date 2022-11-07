@@ -4,7 +4,6 @@ from typing import List, Tuple
 import torch
 from torch import nn
 
-
 class TextImageDiscriminator(nn.Module):
     @abstractmethod
     def forward(self, encoded_images: torch.Tensor, encoded_texts: torch.Tensor) -> torch.Tensor:
@@ -27,8 +26,5 @@ class TextImageDiscriminator(nn.Module):
     @abstractmethod
     def image_height_width(self) -> Tuple[int, int]:
         """Model image height/width"""
-
-
-
 
 

@@ -1,10 +1,9 @@
 from typing import List, Tuple
 
 import torch
-from torch import nn
 from transformers import CLIPModel, CLIPTokenizer, CLIPProcessor, AutoConfig
 
-from examples.text_image_discriminator import TextImageDiscriminator
+from .text_image_discriminator import TextImageDiscriminator
 
 
 class CLIPTextImageDiscriminator(TextImageDiscriminator):

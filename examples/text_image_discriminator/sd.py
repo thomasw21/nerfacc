@@ -2,10 +2,9 @@ import importlib
 from typing import Tuple, List
 
 import torch
-from transformers import CLIPFeatureExtractor
 
-from examples.text_image_discriminator import TextImageDiscriminator
-from diffusers import DiffusionPipeline, AutoencoderKL
+from .text_image_discriminator import TextImageDiscriminator
+from diffusers import DiffusionPipeline
 
 
 class SDTextImageDiscriminator(TextImageDiscriminator):
