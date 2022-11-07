@@ -685,7 +685,7 @@ def main():
             sensors=sensors,
             ray_resample=args.ray_resample_in_training,
             stochastic_rays_through_pixels=args.stochastic_rays_through_pixels,
-            stratified=False,
+            stratified=True,
         )
 
         # Augment images: we duplicate the rendered images
