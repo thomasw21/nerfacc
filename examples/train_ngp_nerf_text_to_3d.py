@@ -85,7 +85,8 @@ def get_args():
 class ViewDependentPrompter:
     """Update input text to condition on camera view"""
 
-    theta_suffix = "overhead view"
+    overhead_suffix = "overhead view"
+    bottom_suffix = "bottom view"
     phi_suffixes = ["front view", "side view", "back view", "side view"]
     def __init__(self, text: str):
         self.text = text
@@ -95,8 +96,12 @@ class ViewDependentPrompter:
 
         TODO @thomasw21: code a generic one using sensor instead of the angles
         """
+
         if theta < 30:
-            return self.get_prompt(self.theta_suffix)
+            return self.get_prompt(self.overhead_suffix)
+
+        if theta > 120:
+            return self.get_prompt(self.bottom_suffix)
 
         quadrants = [60, 180, 240, 360]
         assert len(self.phi_suffixes) == len(quadrants)
@@ -109,7 +114,7 @@ class ViewDependentPrompter:
         return f"{self.text}, {suffix}"
 
     def get_all_text_prompts(self) -> Set[str]:
-        return set(self.get_prompt(suffix) for suffix in set((self.phi_suffixes + [self.theta_suffix])))
+        return set(self.get_prompt(suffix) for suffix in set((self.phi_suffixes + [self.overhead_suffix, self.bottom_suffix])))
 
 @torch.no_grad()
 def generate_random_views(
