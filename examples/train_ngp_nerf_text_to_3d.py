@@ -500,7 +500,8 @@ def data_augment(
     if random_resize_crop:
         transforms = torchvision.transforms.Compose([
             # DreamFields
-            torchvision.transforms.RandomResizedCrop(size=resize_shape, scale=(0.80, 1.0))
+            # torchvision.transforms.RandomResizedCrop(size=resize_shape, scale=(0.80, 1.0))
+            torchvision.transforms.Resize(size=resize_shape)
         ])
     else:
         transforms = torchvision.transforms.Compose([
@@ -664,7 +665,7 @@ def main():
             sensors=sensors,
             ray_resample=args.ray_resample_in_training,
             stochastic_rays_through_pixels=args.stochastic_rays_through_pixels,
-            stratified=True,
+            stratified=False,
         )
 
         # Augment images: we duplicate the rendered images
