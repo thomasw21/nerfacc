@@ -43,7 +43,6 @@ class CLIPTextImageDiscriminator(TextImageDiscriminator):
         # return torch.acos((encoded_texts * encoded_images).sum(-1))
 
     @property
-
     def device(self):
         return self.model.text_projection.weight.device
 
