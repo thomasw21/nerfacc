@@ -213,14 +213,7 @@ class NGPradianceField(torch.nn.Module):
             raise NotImplementedError
 
     def get_params(self, lr: float):
-        params = [
-            {"params": self.encoder.parameters(), "lr": lr * 10},
-            {"params": self.mlp_base.parameters(), "lr": lr},
+        return [
+            {"params": child.parameters(), "lr": lr * 10 if isinstance(child, tcnn.Encoding) else lr}
+            for child in self.children()
         ]
-
-        if self.geo_feat_dim > 0:
-            params.append(
-                {"params": self.mlp_head.parameters(), "lr": lr}
-            )
-
-        return params
