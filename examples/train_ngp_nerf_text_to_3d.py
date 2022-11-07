@@ -3,7 +3,7 @@ import time
 from enum import Enum
 from pathlib import Path
 from random import choices
-from typing import Tuple, List, Callable, Optional
+from typing import Tuple, List, Callable, Optional, Set
 
 import numpy as np
 import torch
@@ -108,8 +108,8 @@ class ViewDependentPrompter:
     def get_prompt(self, suffix: str):
         return f"{self.text}, {suffix}"
 
-    def get_all_text_prompts(self) -> List[str]:
-        return [self.get_prompt(suffix) for suffix in (self.phi_suffixes + [self.theta_suffix])]
+    def get_all_text_prompts(self) -> Set[str]:
+        return set(self.get_prompt(suffix) for suffix in set((self.phi_suffixes + [self.theta_suffix])))
 
 @torch.no_grad()
 def generate_random_views(
@@ -125,8 +125,8 @@ def generate_random_views(
     min_phi, max_phi = phi_range
     if stochastic_views:
         # TODO @thomasw21: Activate uniform sampling over sphere surface
-        if np.random.rand() > 0.5:
-        # if True:
+        # if np.random.rand() > 0.5:
+        if False:
             # biased sampling. More sampling towards the top view
             thetas = torch.rand(num_views, device=device) * (max_theta - min_theta) + min_theta
             phis = torch.rand(num_views, device=device) * (max_phi - min_phi) + min_phi
@@ -386,7 +386,7 @@ def render_images(
                 visibility, packed_info_visible = render_visibility(
                     packed_info,
                     alphas=alphas,
-                    # early_stop_eps=1e-4,
+                    early_stop_eps=0.0,
                     alpha_thre=1e-4
                 )
                 t_starts, t_ends = t_starts[visibility], t_ends[visibility]
@@ -550,6 +550,7 @@ def main():
 
     # optimizer = torch.optim.AdamW(radiance_field.parameters(), lr=args.learning_rate)
     optimizer = torch.optim.Adam(radiance_field.parameters(), lr=args.learning_rate)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda iter: 0.1 ** min(iter / args.iterations, 1))
 
     # Image and text scorer
     if args.text_image_discriminator == "clip":
@@ -666,7 +667,7 @@ def main():
             stratified=True,
         )
 
-        # Augment images
+        # Augment images: we duplicate the rendered images
         images, opacities = data_augment(
             images,
             opacities,
@@ -686,6 +687,7 @@ def main():
         scores = text_image_discriminator(encoded_images=encoded_images, encoded_texts=encoded_texts)
         mean_score = scores.mean()
 
+        ### Compute loss
         sublosses = [mean_score]
         if args.lambda_transmittance_loss > 0:
             t = min(it / args.transmittance_loss_ceil_exponential_annealing_step, 1)
@@ -718,6 +720,7 @@ def main():
         optimizer.zero_grad()
         grad_scaler.scale(loss).backward()
         grad_scaler.step(optimizer)
+        scheduler.step()
         grad_scaler.update()
 
         # Update scene origin
@@ -783,12 +786,7 @@ def main():
                     opacities,
                     random_resize_crop=False,
                     resize_shape=text_image_discriminator.image_height_width,
-                    # backgrounds=None,
-                    backgrounds=choices(
-                        training_backgrounds,
-                        weights=[training_background_probs[bkd] for bkd in training_backgrounds],
-                        k=len(images)
-                    ),
+                    backgrounds=None,
                     blur_background=False
                 )
 
@@ -854,7 +852,7 @@ def main():
         channel_first_images = images.permute(0, 3, 1, 2)
         resized_channel_first_images = F.resize(channel_first_images, text_image_discriminator.image_height_width)
         encoded_texts = torch.stack([
-            text_to_encodings[prompter.get_camera_view_prompt(theta, phi)]
+            text_to_encodings[prompter.get_camera_view_prompt(theta=theta, phi=phi)]
             for theta, phi in zip(thetas, phis)
         ])
         encoded_images = text_image_discriminator.encode_images(
