@@ -109,9 +109,8 @@ class NGPradianceField(torch.nn.Module):
                 },
             )
 
-        self.mlp_base = tcnn.NetworkWithInputEncoding(
+        self.encoder = tcnn.Encoding(
             n_input_dims=num_dim,
-            n_output_dims=1 + self.geo_feat_dim,
             encoding_config={
                 "otype": "HashGrid",
                 "n_levels": n_levels,
@@ -119,7 +118,12 @@ class NGPradianceField(torch.nn.Module):
                 "log2_hashmap_size": log2_hashmap_size,
                 "base_resolution": 16,
                 "per_level_scale": per_level_scale,
-            },
+            }
+        )
+
+        self.mlp_base = tcnn.Encoding(
+            n_input_dims=self.encoder.n_output_dims,
+            n_output_dims=1 + self.geo_feat_dim,
             network_config={
                 "otype": "FullyFusedMLP",
                 "activation": "ReLU",
@@ -207,3 +211,16 @@ class NGPradianceField(torch.nn.Module):
             return rgb, density
         else:
             raise NotImplementedError
+
+    def get_params(self, lr: float):
+        params = [
+            {"params": self.encoder.parameters(), "lr": lr * 10},
+            {"params": self.mlp_base.parameters(), "lr": lr},
+        ]
+
+        if self.geo_feat_dim > 0:
+            params.append(
+                {"params": self.mlp_head.parameters(), "lr": lr}
+            )
+
+        return params

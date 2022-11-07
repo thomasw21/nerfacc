@@ -569,8 +569,8 @@ def main():
     # TODO @thomasw21: Determine if we run tcnn.optimizers
     grad_scaler = torch.cuda.amp.GradScaler()
 
-    # optimizer = torch.optim.AdamW(radiance_field.parameters(), lr=args.learning_rate)
-    optimizer = torch.optim.Adam(radiance_field.parameters(), lr=args.learning_rate)
+    optimizer = torch.optim.AdamW(radiance_field.get_params(args.learning_rate))
+    # optimizer = torch.optim.Adam(radiance_field.get_params(args.learning_rate))
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda iter: 0.1 ** min(iter / args.iterations, 1))
 
     # Image and text scorer
