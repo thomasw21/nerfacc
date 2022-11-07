@@ -68,7 +68,7 @@ def get_args():
 
     ### Logging
     parser.add_argument("--log-interval", type=int, default=100, help="Log every n steps")
-    parser.add_argument("--validation-interval", type=int, default=500, help="Log validation every n steps")
+    parser.add_argument("--validation-interval", type=int, default=100, help="Log validation every n steps")
 
 
     args = parser.parse_args()
@@ -244,6 +244,7 @@ def get_sigma_fn(
     query_density: Callable[[torch.Tensor], torch.Tensor],
     rays_o: torch.Tensor,
     rays_d: torch.Tensor,
+    perturb: bool,
 ) -> Callable[[torch.Tensor, torch.Tensor, torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
     def sigma_fn(
         t_starts: torch.Tensor,
@@ -260,7 +261,11 @@ def get_sigma_fn(
         t_origins = rays_o[ray_indices]  # (n_samples, 3)
         t_dirs = rays_d[ray_indices]  # (n_samples, 3)
         # This essentially compute the mean position, we might instead jitter and randomly sample for robustness
-        positions = t_origins + t_dirs * (t_starts + t_ends) / 2.0
+        if perturb:
+            random_t = torch.rand_like(t_starts) * (t_ends - t_starts) + t_starts
+            positions = t_origins + t_dirs * random_t
+        else:
+            positions = t_origins + t_dirs * (t_starts + t_ends) / 2.0
         sigmas = query_density(positions)
         return sigmas, positions  # (n_samples, 1)
     return sigma_fn
@@ -269,6 +274,7 @@ def get_rgb_sigma_fn(
     radiance_field: nn.Module,
     rays_o: torch.Tensor,
     rays_d: torch.Tensor,
+    perturb: bool
 ) -> Callable[[torch.Tensor, torch.Tensor, torch.Tensor], Tuple[torch.Tensor, torch.Tensor,  torch.Tensor]]:
     def rgb_sigma_fn(
         t_starts: torch.Tensor,
@@ -285,7 +291,11 @@ def get_rgb_sigma_fn(
         t_origins = rays_o[ray_indices]  # (n_samples, 3)
         t_dirs = rays_d[ray_indices]  # (n_samples, 3)
         # This essentially compute the mean position, we might instead jitter and randomly sample for robustness
-        positions = t_origins + t_dirs * (t_starts + t_ends) / 2.0
+        if perturb:
+            random_t = torch.rand_like(t_starts) * (t_ends - t_starts) + t_starts
+            positions = t_origins + t_dirs * random_t
+        else:
+            positions = t_origins + t_dirs * (t_starts + t_ends) / 2.0
         rgbs, sigmas = radiance_field(positions, t_dirs)
         return rgbs, sigmas, positions  # (n_samples, 3), (n_samples, 1)
     return rgb_sigma_fn
@@ -357,12 +367,12 @@ def render_images(
                 grid=occupancy_grid, # This is fucked
                 # near_plane=0.2,
                 # far_plane=1.0,
-                # early_stop_eps=1e-4,
+                early_stop_eps=0.0,
                 # alpha_thre=1e-4, # nerfstudio uses 1e-4, default is 0.0
-                stratified=stratified
+                stratified=False
             )
 
-            sigma_fn = get_sigma_fn(query_density, rays_o=origins_shard, rays_d=view_dirs_shard)
+            sigma_fn = get_sigma_fn(query_density, rays_o=origins_shard, rays_d=view_dirs_shard, perturb=stratified)
             if ray_resample:
                 # Select only visible segments
                 # Query sigma without gradients
@@ -410,7 +420,7 @@ def render_images(
 
         # Differentiable Volumetric Rendering.
         # colors: (n_rays, 3). opacity: (n_rays, 1). depth: (n_rays, 1).
-        rgb_sigma_fn = get_rgb_sigma_fn(radiance_field, rays_o=origins_shard, rays_d=view_dirs_shard)
+        rgb_sigma_fn = get_rgb_sigma_fn(radiance_field, rays_o=origins_shard, rays_d=view_dirs_shard, perturb=True)
         color, opacity, depth = nerfacc.rendering(
             rgb_sigma_fn=lambda *args: rgb_sigma_fn(*args)[:2],
             packed_info=packed_info,
