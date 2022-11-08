@@ -112,7 +112,8 @@ class NGPradianceField(torch.nn.Module):
         self.encoder = tcnn.Encoding(
             n_input_dims=num_dim,
             encoding_config={
-                "otype": "HashGrid",
+                "otype": "Grid",
+                "type": "Tiled",
                 "n_levels": n_levels,
                 "n_features_per_level": 2,
                 "log2_hashmap_size": log2_hashmap_size,
