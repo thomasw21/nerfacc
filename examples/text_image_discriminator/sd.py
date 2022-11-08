@@ -67,7 +67,7 @@ class SDTextImageDiscriminator(TextImageDiscriminator):
 
     def encode_texts(self, texts: List[str]) -> torch.Tensor:
         inputs = self.tokenizer(texts, padding=True, return_tensors="pt").to(self.device)
-        return self.model.get_text_features(**inputs)
+        return self.text_encoder(**inputs)
 
     def encode_images(self, images: torch.Tensor, encoded_texts: torch.Tensor):
         assert len(images) == encoded_texts.shape[0], f"Image: {images.shape}\nEncoded_texts: {encoded_texts.shape}"
