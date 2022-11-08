@@ -53,7 +53,7 @@ class SDTextImageDiscriminator(TextImageDiscriminator):
 
             latent_model_input = self.scheduler.scale_model_input(latent_model_input)
 
-            noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=encoded_texts)
+            noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=encoded_texts).sample
 
             # TODO @thomasw21: Uncomment once we get guidance correctly setup
             # noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
@@ -74,7 +74,7 @@ class SDTextImageDiscriminator(TextImageDiscriminator):
 
     def encode_texts(self, texts: List[str]) -> torch.Tensor:
         inputs = self.tokenizer(texts, padding=True, return_tensors="pt").to(self.device)
-        return self.text_encoder(**inputs)
+        return self.text_encoder(**inputs).last_hidden_state
 
     def encode_images(self, images: torch.Tensor, encoded_texts: torch.Tensor):
         assert len(images) == encoded_texts.shape[0], f"Image: {images.shape}\nEncoded_texts: {encoded_texts.shape}"
