@@ -22,7 +22,11 @@ class SDTextImageDiscriminator(TextImageDiscriminator):
             libname, classname = self.config[module_name]
             lib = importlib.import_module(libname)
             class_ = getattr(lib, classname)
-            setattr(self, module_name, class_.from_pretrained(model_name, subfolder=module_name))
+            if hasattr(class_, "from_pretrained"):
+                setattr(self, module_name, class_.from_pretrained(model_name, subfolder=module_name))
+            else:
+                assert hasattr(class_, "from_config"), f"{class_} should have a `from_pretrained` or a `from_config` method"
+                setattr(self, module_name, class_.from_config(model_name, subfolder=module_name))
 
         # TODO @thomasw21: understand how num_train_timesteps is setup
         self.num_train_timesteps = 1000
