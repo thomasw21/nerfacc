@@ -76,7 +76,7 @@ class SDTextImageDiscriminator(TextImageDiscriminator):
         # normalize image
         images = 2 * images - 1 # [0, 1] -> [-1, 1]
 
-        encoded = self.vae.encode(sample=images, return_dict=True)
+        encoded = self.vae.encode(x=images, return_dict=True)
         # sample and scale
         sampled_encoding = encoded.latent_dist.sample() * (0.18215 * self.scheduler.init_noise_sigma)
 
