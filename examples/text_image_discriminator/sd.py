@@ -30,30 +30,34 @@ class SDTextImageDiscriminator(TextImageDiscriminator):
         self.max_step = int(self.num_train_timesteps * 0.98)
 
     def forward(self, encoded_images: torch.Tensor, encoded_texts: torch.Tensor) -> torch.Tensor:
-        guidance_scale = 7.5
+        with torch.no_grad():
+            guidance_scale = 7.5
 
-        # TODO @thomasw21: understand this
-        t = torch.randint(self.min_step, self.max_step + 1, [1], dtype=torch.long, device=self.device) # timestep
+            # TODO @thomasw21: understand this
+            t = torch.randint(self.min_step, self.max_step + 1, [1], dtype=torch.long, device=self.device) # timestep
 
-        # Add random noise
-        noise = torch.randn_like(encoded_images)
-        latents_noisy = self.scheduler.add_noise(encoded_images, noise, t)
+            # Add random noise
+            noise = torch.randn_like(encoded_images)
+            latents_noisy = self.scheduler.add_noise(encoded_images, noise, t)
 
-        # Now we predict the noise
-        latent_model_input = torch.cat([latents_noisy] * 2)
-        latent_model_input = self.scheduler.scale_model_input(latent_model_input)
-        noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=encoded_texts)
+            # Now we predict the noise
+            latent_model_input = torch.cat([latents_noisy] * 2)
+            latent_model_input = self.scheduler.scale_model_input(latent_model_input)
+            noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=encoded_texts)
 
-        noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-        noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+            noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+            noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
-        loss = noise - noise_pred
 
         # TODO @thomasw21: Figure out weighting and how it works exactly
         # # w(t), sigma_t^2
         # w = (1 - self.alphas[t])
         # # w = self.alphas[t] ** 0.5 * (1 - self.alphas[t])
         # grad = w * (noise_pred - noise)
+
+        # Compute loss as sum over every pixel and mean over batch size
+        loss = torch.sum(torch.mean((noise - noise_pred) * encoded_images, dim=0))
+        # loss = torch.sum(torch.mean(w * (noise - noise_pred) * encoded_images, dim=0))
 
         return loss
 
