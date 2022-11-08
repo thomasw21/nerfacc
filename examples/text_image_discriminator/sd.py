@@ -35,22 +35,29 @@ class SDTextImageDiscriminator(TextImageDiscriminator):
 
     def forward(self, encoded_images: torch.Tensor, encoded_texts: torch.Tensor) -> torch.Tensor:
         with torch.no_grad():
+            batch_size = encoded_images.shape[0]
             guidance_scale = 7.5
 
             # TODO @thomasw21: understand this
-            t = torch.randint(self.min_step, self.max_step + 1, [1], dtype=torch.long, device=self.device) # timestep
+            t = torch.randint(self.min_step, self.max_step + 1, [batch_size], dtype=torch.long, device=self.device) # timestep
 
             # Add random noise
             noise = torch.randn_like(encoded_images)
             latents_noisy = self.scheduler.add_noise(encoded_images, noise, t)
 
             # Now we predict the noise
-            latent_model_input = torch.cat([latents_noisy] * 2)
+            # TODO @thomasw21: Do some sort of negative prompts for guidance
+            # encoded_texts = torch.cat([encoded_texts, encoded_texts])
+            # latent_model_input = torch.cat([latents_noisy] * 2)
+            latent_model_input = latents_noisy
+
             latent_model_input = self.scheduler.scale_model_input(latent_model_input)
+
             noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=encoded_texts)
 
-            noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-            noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+            # TODO @thomasw21: Uncomment once we get guidance correctly setup
+            # noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+            # noise_pred = noise_pred_uncond # + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
 
         # TODO @thomasw21: Figure out weighting and how it works exactly
