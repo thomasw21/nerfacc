@@ -37,7 +37,7 @@ class SDTextImageDiscriminator(TextImageDiscriminator):
             self.scheduler.alphas_cumprod
         ) # for convenience
 
-        self.guidance = 100
+        self.guidance_scale = 100
 
     def forward(self, encoded_images: torch.Tensor, encoded_texts: torch.Tensor) -> torch.Tensor:
         with torch.no_grad():
@@ -53,11 +53,13 @@ class SDTextImageDiscriminator(TextImageDiscriminator):
             # Now we predict the noise
             # TODO @thomasw21: Do some sort of negative prompts for guidance
             latent_model_input = torch.repeat_interleave(latents_noisy, repeats=2, dim=0)
+            t_model_input = torch.repeat_interleave(t, repeats=2, dim=0)
             # latent_model_input = latents_noisy
+            # t_model_input = t
 
             latent_model_input = self.scheduler.scale_model_input(latent_model_input)
 
-            noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=encoded_texts).sample
+            noise_pred = self.unet(latent_model_input, t_model_input, encoder_hidden_states=encoded_texts).sample
 
             # TODO @thomasw21: Uncomment once we get guidance correctly setup
             noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
@@ -86,7 +88,7 @@ class SDTextImageDiscriminator(TextImageDiscriminator):
         return self.text_encoder(**inputs).last_hidden_state
 
     def encode_images(self, images: torch.Tensor, encoded_texts: torch.Tensor):
-        if self.guidance == 0:
+        if self.guidance_scale == 0:
             assert len(images) == encoded_texts.shape[0], f"Image: {images.shape}\nEncoded_texts: {encoded_texts.shape}"
         else:
             # For each positive sample, we have one negative sample
