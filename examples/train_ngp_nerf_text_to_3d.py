@@ -548,6 +548,30 @@ def save_model(radiance_field: nn.Module, path: Path):
     print(f"Saving model to {path.absolute()}")
     torch.save(radiance_field.state_dict(), path)
 
+def save_images(
+    path: Path,
+    images: torch.Tensor,
+    opacities: torch.Tensor
+):
+    """For each image save one with black background and the other one with white background"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    print(f"Saving images to {path.absolute()}")
+    save_image(
+        tensor=images.permute(0, 3, 1, 2),  # channel first
+        fp=path,
+    )
+    images = add_background(
+        color=images,
+        opacity=opacities,
+        backgrounds=[Background.WHITE for _ in range(len(images))],
+        blur_background=False
+    )
+    save_image(
+        tensor=images.permute(0, 3, 1, 2),
+        fp=path.parent / f"{path.stem}_white{path.suffix}"
+    )
+
+
 def main():
     args = get_args()
 
@@ -827,8 +851,23 @@ def main():
                     channel_first_images,
                     encoded_texts=encoded_texts
                 )
-                scores = text_image_discriminator(encoded_images=encoded_images, encoded_texts=encoded_texts)
-                mean_score = scores.mean()
+
+                chunk_size = 8
+                scores = []
+                text_image_ratio = len(encoded_texts) // len(encoded_images)
+                for start in range(0, len(encoded_images), chunk_size):
+                    end = start + chunk_size
+                    encoded_images_chunk = encoded_images[start: end]
+                    encoded_texts_chunk = encoded_texts[text_image_ratio * start: text_image_ratio * end]
+                    scores.append(text_image_discriminator(encoded_images=encoded_images_chunk,
+                                                           encoded_texts=encoded_texts_chunk))
+                mean_score = torch.cat(scores).mean()
+
+                save_images(
+                    images=images,
+                    opacities=opacities,
+                    path=args.save_images_path / "validation" / f"{it}-of-{args.iterations}" / "result.jpg"
+                )
 
             print("##### validation")
             print(
@@ -905,20 +944,10 @@ def main():
         )
 
         ## Saving
-        print(f"Saving images to {args.save_images_path.absolute()}")
-        save_image(
-            tensor=channel_first_images, #channel first
-            fp=args.save_images_path,
-        )
-        images = add_background(
-            color=images,
-            opacity=opacities,
-            backgrounds=[Background.WHITE for _ in range(len(images))],
-            blur_background=False
-        )
-        save_image(
-            tensor=images.permute(0, 3, 1, 2),
-            fp=args.save_images_path.parent / f"{args.save_images_path.stem}_aug{args.save_images_path.suffix}"
+        save_images(
+            images=images,
+            opacities=opacities,
+            path=args.save_images_path / "final.jpg"
         )
 
 
