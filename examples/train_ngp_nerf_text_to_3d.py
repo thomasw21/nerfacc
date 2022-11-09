@@ -889,7 +889,7 @@ def main():
         chunk_size = 8
         scores = []
         text_image_ratio = len(encoded_texts) // len(encoded_images)
-        for start in range(len(encoded_images), chunk_size):
+        for start in range(0, len(encoded_images), chunk_size):
             end = start + chunk_size
             encoded_images_chunk = encoded_images[start: end]
             encoded_texts_chunk = encoded_texts[text_image_ratio * start: text_image_ratio * end]
