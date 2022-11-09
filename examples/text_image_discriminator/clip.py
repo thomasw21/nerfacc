@@ -27,6 +27,7 @@ class CLIPTextImageDiscriminator(TextImageDiscriminator):
         )
 
     def forward(self, encoded_images: torch.Tensor, encoded_texts: torch.Tensor) -> torch.Tensor:
+        batch_size = encoded_images.shape[0]
 
         ### Copied form `modeling_clip.py`
         # normalized features
@@ -39,7 +40,10 @@ class CLIPTextImageDiscriminator(TextImageDiscriminator):
         # return - (encoded_texts * encoded_images).sum(-1)
 
         # # Intuitively you really want to reach one really fast (ie gains from 0.5 to 1 are more important than from 0 to 0.5), we need a more hardcore convex function maybe log(1 - cosine)
-        return - (encoded_texts * encoded_images).sum(-1)
+        return torch.bmm(
+            encoded_texts.view(batch_size, 1, -1),
+            encoded_images.view(batch_size, -1 ,1)
+        ).squeeze(2).squeeze(1)
         # return torch.acos((encoded_texts * encoded_images).sum(-1))
 
     @property
