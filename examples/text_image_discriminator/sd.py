@@ -62,7 +62,7 @@ class SDTextImageDiscriminator(TextImageDiscriminator):
             noise_pred = self.unet(latent_model_input, t_model_input, encoder_hidden_states=encoded_texts).sample
 
             # TODO @thomasw21: Uncomment once we get guidance correctly setup
-            noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+            noise_pred_text, noise_pred_uncond = noise_pred[::2], noise_pred[1::2]
             noise_pred = noise_pred_uncond + self.guidance_scale * (noise_pred_text - noise_pred_uncond)
 
 
