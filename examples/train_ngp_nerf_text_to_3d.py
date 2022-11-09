@@ -885,8 +885,16 @@ def main():
             resized_channel_first_images,
             encoded_texts=encoded_texts
         )
-        scores = text_image_discriminator(encoded_images=encoded_images, encoded_texts=encoded_texts)
-        mean_score = scores.mean()
+
+        chunk_size = 8
+        scores = []
+        text_image_ratio = len(encoded_texts) // len(encoded_images)
+        for start in range(len(encoded_images), chunk_size):
+            end = start + chunk_size
+            encoded_images_chunk = encoded_images[start: end]
+            encoded_texts_chunk = encoded_texts[text_image_ratio * start: text_image_ratio * end]
+            scores.append(text_image_discriminator(encoded_images=encoded_images_chunk, encoded_texts=encoded_texts_chunk))
+        mean_score = torch.cat(scores).mean()
 
         ### Logs
         print("###### Evaluation ##########")
