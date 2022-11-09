@@ -69,7 +69,7 @@ class SDTextImageDiscriminator(TextImageDiscriminator):
         # TODO @thomasw21: Figure out weighting and how it works exactly
         # w(t), sigma_t^2
         # https://github.com/huggingface/diffusers/blob/3f7edc5f724862cce8d43bca1b531d962e963a3a/src/diffusers/schedulers/scheduling_pndm.py#L404
-        w = self.alphas[t] ** 2
+        w = self.alphas[t] ** 0.5
         # w = self.alphas[t][:, None, None, None]
         # w = self.alphas[t] ** 0.5 * (1 - self.alphas[t])
         # grad = w * (noise_pred - noise)
