@@ -819,7 +819,7 @@ def main():
 
                 ### Compute loss
                 channel_first_images = images.permute(0, 3, 1, 2)
-                encoded_texts = torch.stack([
+                encoded_texts = torch.cat([
                     text_to_encodings[prompter.get_camera_view_prompt(theta=theta, phi=phi)]
                     for theta, phi in zip(thetas, phis)
                 ])
@@ -877,7 +877,7 @@ def main():
         ### Compute loss
         channel_first_images = images.permute(0, 3, 1, 2)
         resized_channel_first_images = F.resize(channel_first_images, text_image_discriminator.image_height_width)
-        encoded_texts = torch.stack([
+        encoded_texts = torch.cat([
             text_to_encodings[prompter.get_camera_view_prompt(theta=theta, phi=phi)]
             for theta, phi in zip(thetas, phis)
         ])
