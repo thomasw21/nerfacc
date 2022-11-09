@@ -29,9 +29,13 @@ class SDTextImageDiscriminator(TextImageDiscriminator):
                 setattr(self, module_name, class_.from_config(model_name, subfolder=module_name))
 
         # TODO @thomasw21: understand how num_train_timesteps is setup
-        self.num_train_timesteps = 1000
-        self.min_step = int(self.num_train_timesteps * 0.02)
-        self.max_step = int(self.num_train_timesteps * 0.98)
+        self.min_step = int(self.scheduler.num_train_timesteps * 0.02)
+        self.max_step = int(self.scheduler.num_train_timesteps * 0.98)
+
+        self.register_buffer(
+            "alphas",
+            self.scheduler.alphas_cumprod
+        ) # for convenience
 
     def forward(self, encoded_images: torch.Tensor, encoded_texts: torch.Tensor) -> torch.Tensor:
         with torch.no_grad():
@@ -43,7 +47,7 @@ class SDTextImageDiscriminator(TextImageDiscriminator):
 
             # Add random noise
             noise = torch.randn_like(encoded_images)
-            latents_noisy = self.scheduler.add_noise(encoded_images, noise, t)
+            latents_noisy = self.scheduler.add_noise(original_samples=encoded_images, noise=noise, timesteps=t)
 
             # Now we predict the noise
             # TODO @thomasw21: Do some sort of negative prompts for guidance
@@ -61,13 +65,13 @@ class SDTextImageDiscriminator(TextImageDiscriminator):
 
 
         # TODO @thomasw21: Figure out weighting and how it works exactly
-        # # w(t), sigma_t^2
-        # w = (1 - self.alphas[t])
-        # # w = self.alphas[t] ** 0.5 * (1 - self.alphas[t])
+        # w(t), sigma_t^2
+        w = self.alphas[t]
+        # w = self.alphas[t] ** 0.5 * (1 - self.alphas[t])
         # grad = w * (noise_pred - noise)
 
         # Compute loss as sum over every pixel and mean over batch size
-        loss = torch.sum(torch.mean((noise_pred - noise) * encoded_images, dim=0))
+        loss = torch.sum(torch.mean(w * (noise_pred - noise) * encoded_images, dim=0))
         # loss = torch.sum(torch.mean(w * (noise_pred - noise) * encoded_images, dim=0))
 
         return loss
