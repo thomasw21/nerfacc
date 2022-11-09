@@ -608,7 +608,7 @@ def main():
     all_texts = prompter.get_all_text_prompts()
     with torch.no_grad():
         text_to_encodings = {
-            text: text_image_discriminator.encode_texts([text])[0]
+            text: text_image_discriminator.encode_texts([text])
             for text in all_texts
         }
 
@@ -649,7 +649,7 @@ def main():
             )
 
             # Generate a view dependent prompt
-            encoded_texts = torch.stack([
+            encoded_texts = torch.cat([
                 text_to_encodings[prompter.get_camera_view_prompt(theta=theta, phi=phi)]
                 for theta, phi in zip(thetas, phis)]
             )

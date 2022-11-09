@@ -40,7 +40,8 @@ class SDTextImageDiscriminator(TextImageDiscriminator):
     def forward(self, encoded_images: torch.Tensor, encoded_texts: torch.Tensor) -> torch.Tensor:
         with torch.no_grad():
             batch_size = encoded_images.shape[0]
-            guidance_scale = 7.5
+            # TODO @thomasw21: setup guidance
+            guidance_scale = 100
 
             # TODO @thomasw21: understand this
             t = torch.randint(self.min_step, self.max_step + 1, [batch_size], dtype=torch.long, device=self.device) # timestep
@@ -51,17 +52,16 @@ class SDTextImageDiscriminator(TextImageDiscriminator):
 
             # Now we predict the noise
             # TODO @thomasw21: Do some sort of negative prompts for guidance
-            # encoded_texts = torch.cat([encoded_texts, encoded_texts])
-            # latent_model_input = torch.cat([latents_noisy] * 2)
-            latent_model_input = latents_noisy
+            latent_model_input = torch.repeat_interleave(latents_noisy, repeats=2, dim=0)
+            # latent_model_input = latents_noisy
 
             latent_model_input = self.scheduler.scale_model_input(latent_model_input)
 
             noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=encoded_texts).sample
 
             # TODO @thomasw21: Uncomment once we get guidance correctly setup
-            # noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-            # noise_pred = noise_pred_uncond # + guidance_scale * (noise_pred_text - noise_pred_uncond)
+            noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+            noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
 
         # TODO @thomasw21: Figure out weighting and how it works exactly
@@ -79,7 +79,10 @@ class SDTextImageDiscriminator(TextImageDiscriminator):
         return loss
 
     def encode_texts(self, texts: List[str]) -> torch.Tensor:
-        inputs = self.tokenizer(texts, padding=True, return_tensors="pt").to(self.device)
+        # We add negative text_encodings with empty strings ""
+        negative_texts = [""] * len(texts)
+
+        inputs = self.tokenizer(texts + negative_texts, padding=True, return_tensors="pt").to(self.device)
         return self.text_encoder(**inputs).last_hidden_state
 
     def encode_images(self, images: torch.Tensor, encoded_texts: torch.Tensor):
