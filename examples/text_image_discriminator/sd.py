@@ -37,11 +37,11 @@ class SDTextImageDiscriminator(TextImageDiscriminator):
             self.scheduler.alphas_cumprod
         ) # for convenience
 
+        self.guidance = 100
+
     def forward(self, encoded_images: torch.Tensor, encoded_texts: torch.Tensor) -> torch.Tensor:
         with torch.no_grad():
             batch_size = encoded_images.shape[0]
-            # TODO @thomasw21: setup guidance
-            guidance_scale = 100
 
             # TODO @thomasw21: understand this
             t = torch.randint(self.min_step, self.max_step + 1, [batch_size], dtype=torch.long, device=self.device) # timestep
@@ -61,7 +61,7 @@ class SDTextImageDiscriminator(TextImageDiscriminator):
 
             # TODO @thomasw21: Uncomment once we get guidance correctly setup
             noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-            noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+            noise_pred = noise_pred_uncond + self.guidance_scale * (noise_pred_text - noise_pred_uncond)
 
 
         # TODO @thomasw21: Figure out weighting and how it works exactly
@@ -86,7 +86,11 @@ class SDTextImageDiscriminator(TextImageDiscriminator):
         return self.text_encoder(**inputs).last_hidden_state
 
     def encode_images(self, images: torch.Tensor, encoded_texts: torch.Tensor):
-        assert len(images) == encoded_texts.shape[0], f"Image: {images.shape}\nEncoded_texts: {encoded_texts.shape}"
+        if self.guidance == 0:
+            assert len(images) == encoded_texts.shape[0], f"Image: {images.shape}\nEncoded_texts: {encoded_texts.shape}"
+        else:
+            # For each positive sample, we have one negative sample
+            assert 2 * len(images) == encoded_texts.shape[0], f"Image: {images.shape}\nEncoded_texts: {encoded_texts.shape}"
         assert images.shape[1] == 3, "RGB images"
 
         # normalize image
