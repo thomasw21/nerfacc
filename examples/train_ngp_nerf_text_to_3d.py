@@ -3,7 +3,7 @@ import time
 from enum import Enum
 from pathlib import Path
 from random import choices
-from typing import Tuple, List, Callable, Optional, Set
+from typing import Tuple, List, Callable, Optional, Set, Any, Dict
 
 import numpy as np
 import torch
@@ -13,67 +13,178 @@ from torch import nn
 from torchvision.utils import save_image
 
 import nerfacc
+from background import MLPBackground
 from text_image_discriminator.clip import CLIPTextImageDiscriminator
 from text_image_discriminator.sd import SDTextImageDiscriminator
-from nerfacc import OccupancyGrid, ContractionType, unpack_info, render_visibility
+from nerfacc import (
+    OccupancyGrid,
+    ContractionType,
+    unpack_info,
+    render_visibility,
+)
 
 """
 TODOs:
- - Intermediary rendering to check that things are going well
+ - Create a video
+ - Learn background color instead for seperation for sd, it seems otherwise the model tries to fill it itself
+ - Make faster training by allowing distributed training
 """
+
 
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--text", type=str, required=True, help="Text to fit")
-    parser.add_argument("--save-model-path", type=Path, required=True, help="Where to save the model")
-    parser.add_argument("--load-model-path", type=Path, help="Where to load the model from")
-    parser.add_argument("--save-images-path", type=Path, required=True, help="Where to save the images that we generate at the end")
+    parser.add_argument(
+        "--save-model-path",
+        type=Path,
+        required=True,
+        help="Where to save the model",
+    )
+    parser.add_argument(
+        "--load-model-path", type=Path, help="Where to load the model from"
+    )
+    parser.add_argument(
+        "--save-images-path",
+        type=Path,
+        required=True,
+        help="Where to save the images that we generate at the end",
+    )
 
-    ### Training nerf configs
-    parser.add_argument("--text-image-discriminator", type=str, choices=["clip", "sd"], help="Determine which text/image discriminator to use.")
+    # Training nerf configs
+    parser.add_argument(
+        "--text-image-discriminator",
+        type=str,
+        choices=["clip", "sd"],
+        help="Determine which text/image discriminator to use.",
+    )
     parser.add_argument(
         "--aabb",
         type=lambda s: [float(item) for item in s.split(",")],
         default="-0.5,-0.5,-0.5,0.5,0.5,0.5",
         help="delimited list input",
     )
-    parser.add_argument("--unbounded", action="store_true", help="whether to use unbounded rendering")
-    parser.add_argument("--update-occupancy-grid-interval", type=int, default=16, help="Update occupancy grid every n steps")
+    parser.add_argument(
+        "--background",
+        type=str,
+        choices=["random_backgrounds", "learned_background"],
+        default="random_backgrounds",
+    )
+    parser.add_argument(
+        "--unbounded",
+        action="store_true",
+        help="whether to use unbounded rendering",
+    )
+    parser.add_argument(
+        "--update-occupancy-grid-interval",
+        type=int,
+        default=16,
+        help="Update occupancy grid every n steps",
+    )
     parser.add_argument("--ray-resample-in-training", action="store_true")
-    parser.add_argument("--stochastic-rays-through-pixels", action="store_true", help="Flag to allow model to sample any ray that goes through the pixel")
-    parser.add_argument("--use-viewdirs", action="store_true", help="Whether the model use view dir in order to generate voxel color")
-    parser.add_argument("--track-scene-origin-decay", type=float, default=0.999, help="Track scene origin with decay")
+    parser.add_argument(
+        "--stochastic-rays-through-pixels",
+        action="store_true",
+        help="Flag to allow model to sample any ray that goes through the pixel",
+    )
+    parser.add_argument(
+        "--use-viewdirs",
+        action="store_true",
+        help="Whether the model use view dir in order to generate voxel color",
+    )
+    parser.add_argument(
+        "--track-scene-origin-decay",
+        type=float,
+        default=0.999,
+        help="Track scene origin with decay",
+    )
     parser.add_argument("--use-occupancy-grid", action="store_true")
-    parser.add_argument("--training-thetas", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[60, 90], help="Elevation angle you're training at")
-    parser.add_argument("--training-phis", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[0, 360], help="Around the lattitude you're training at")
-    parser.add_argument("--training-resolution", type=lambda x: tuple(int(elt) for elt in x.split(",")), default=[224, 224], help="Image resolution to generate")
-    parser.add_argument("--validation-thetas", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[45, 45], help="Elevation angle you're validatin at")
-    parser.add_argument("--validation-phis", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=[0, 360], help="Around the lattitude you're validating at")
-    parser.add_argument("--validation-resolution", type=lambda x: tuple(int(elt) for elt in x.split(",")), default=[256, 256], help="Image resolution to generate")
+    parser.add_argument(
+        "--training-thetas",
+        type=lambda x: tuple(float(elt) for elt in x.split(",")),
+        default=[60, 90],
+        help="Elevation angle you're training at",
+    )
+    parser.add_argument(
+        "--training-phis",
+        type=lambda x: tuple(float(elt) for elt in x.split(",")),
+        default=[0, 360],
+        help="Around the lattitude you're training at",
+    )
+    parser.add_argument(
+        "--training-resolution",
+        type=lambda x: tuple(int(elt) for elt in x.split(",")),
+        default=[224, 224],
+        help="Image resolution to generate",
+    )
+    parser.add_argument(
+        "--validation-thetas",
+        type=lambda x: tuple(float(elt) for elt in x.split(",")),
+        default=[45, 45],
+        help="Elevation angle you're validatin at",
+    )
+    parser.add_argument(
+        "--validation-phis",
+        type=lambda x: tuple(float(elt) for elt in x.split(",")),
+        default=[0, 360],
+        help="Around the lattitude you're validating at",
+    )
+    parser.add_argument(
+        "--validation-resolution",
+        type=lambda x: tuple(int(elt) for elt in x.split(",")),
+        default=[256, 256],
+        help="Image resolution to generate",
+    )
 
-    ### Optimizer
+    # Optimizer
     # See DreamFields paper
     parser.add_argument("--lambda-transmittance-loss", type=float, default=0.5)
-    parser.add_argument("--transmittance-loss-ceil-range", type=lambda x: tuple(float(elt) for elt in x.split(",")), default=(0.5,0.9))
-    parser.add_argument("--transmittance-loss-ceil-exponential-annealing-step", type=int, default=500)
+    parser.add_argument(
+        "--transmittance-loss-ceil-range",
+        type=lambda x: tuple(float(elt) for elt in x.split(",")),
+        default=(0.5, 0.9),
+    )
+    parser.add_argument(
+        "--transmittance-loss-ceil-exponential-annealing-step",
+        type=int,
+        default=500,
+    )
     # DreamFusion paper loss
     parser.add_argument("--lambda-opacity", type=float, default=1e-3)
     # Dreamfusion Open source implementation
-    parser.add_argument("--lambda-transmittance-entropy", type=float, default=1e-4)
+    parser.add_argument(
+        "--lambda-transmittance-entropy", type=float, default=1e-4
+    )
     # Center loss, for all the sigmas to be close to 0
     parser.add_argument("--lambda-center-loss", type=float, default=0.0)
-    parser.add_argument("--learning-rate", type=float, default=1e-2, help="Learning rate")
-    parser.add_argument("--iterations", type=int, default=2000, help="Number of optimizer steps")
-    parser.add_argument("--batch-size", type=int, default=2, help="Number of camera views within a single batch")
+    parser.add_argument(
+        "--learning-rate", type=float, default=1e-2, help="Learning rate"
+    )
+    parser.add_argument(
+        "--iterations", type=int, default=2000, help="Number of optimizer steps"
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=2,
+        help="Number of camera views within a single batch",
+    )
 
-    ### Logging
-    parser.add_argument("--log-interval", type=int, default=100, help="Log every n steps")
-    parser.add_argument("--validation-interval", type=int, default=100, help="Log validation every n steps")
-
+    # Logging
+    parser.add_argument(
+        "--log-interval", type=int, default=100, help="Log every n steps"
+    )
+    parser.add_argument(
+        "--validation-interval",
+        type=int,
+        default=100,
+        help="Log validation every n steps",
+    )
 
     args = parser.parse_args()
     if args.use_occupancy_grid:
-        assert False, "TODO @thomasw21: Figure out show to handle that frid resolution, with image resolution with rendering steps ..."
+        assert (
+            False
+        ), "TODO @thomasw21: Figure out show to handle that grid resolution, with image resolution with rendering steps ..."
         args.grid_resolution = 128
 
     args.save_model_path.parent.mkdir(parents=True, exist_ok=True)
@@ -88,14 +199,13 @@ class ViewDependentPrompter:
     overhead_suffix = "overhead view"
     bottom_suffix = "bottom view"
     phi_suffixes = ["front view", "side view", "back view", "side view"]
+
     def __init__(self, text: str):
         self.text = text
 
     def get_camera_view_prompt(self, theta: float, phi: float) -> str:
-        """Given a homogenous matrix, we return the updated prompt
-
-        TODO @thomasw21: code a generic one using sensor instead of the angles
-        """
+        """Given a homogenous matrix, we return the updated prompt"""
+        # TODO @thomasw21: code a generic one using sensor instead of the angles
 
         if theta < 30:
             return self.get_prompt(self.overhead_suffix)
@@ -114,15 +224,21 @@ class ViewDependentPrompter:
         return f"{self.text}, {suffix}"
 
     def get_all_text_prompts(self) -> Set[str]:
-        return set(self.get_prompt(suffix) for suffix in set((self.phi_suffixes + [self.overhead_suffix, self.bottom_suffix])))
+        return set(
+            self.get_prompt(suffix)
+            for suffix in set(
+                (self.phi_suffixes + [self.overhead_suffix, self.bottom_suffix])
+            )
+        )
+
 
 @torch.no_grad()
 def generate_random_views(
-    num_views: int,
-    device: torch.device,
-    theta_range: Tuple[float, float],
-    phi_range: Tuple[float, float],
-    stochastic_views: bool = True,
+        num_views: int,
+        device: torch.device,
+        theta_range: Tuple[float, float],
+        phi_range: Tuple[float, float],
+        stochastic_views: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     # TODO @thomasw21: Interestingly this doesn't sample uniformily around the cirle (typically upsample regions around the poles)
     #  - To sample around the circle you need use normalized gaussian but otherwise I need to figure things out.
@@ -133,14 +249,31 @@ def generate_random_views(
         # if np.random.rand() > 0.5:
         if False:
             # biased sampling. More sampling towards the top view
-            thetas = torch.rand(num_views, device=device) * (max_theta - min_theta) + min_theta
-            phis = torch.rand(num_views, device=device) * (max_phi - min_phi) + min_phi
+            thetas = (
+                    torch.rand(num_views, device=device) * (max_theta - min_theta)
+                    + min_theta
+            )
+            phis = (
+                    torch.rand(num_views, device=device) * (max_phi - min_phi)
+                    + min_phi
+            )
         else:
             # http://corysimon.github.io/articles/uniformdistn-on-sphere/
             cos_min_theta = np.cos(min_theta * torch.pi / 180)
             cos_max_theta = np.cos(max_theta * torch.pi / 180)
-            thetas = torch.acos(torch.rand(num_views, device=device) * (cos_max_theta - cos_min_theta) + cos_min_theta) * 180 / torch.pi
-            phis = torch.rand(num_views, device=device) * (max_phi - min_phi) + min_phi
+            thetas = (
+                    torch.acos(
+                        torch.rand(num_views, device=device)
+                        * (cos_max_theta - cos_min_theta)
+                        + cos_min_theta
+                    )
+                    * 180
+                    / torch.pi
+            )
+            phis = (
+                    torch.rand(num_views, device=device) * (max_phi - min_phi)
+                    + min_phi
+            )
     else:
         assert num_views % 2 == 0
         half_num_views = num_views // 2
@@ -148,30 +281,60 @@ def generate_random_views(
             thetas = torch.full((num_views,), min_theta, device=device)
         else:
             # We're going to make two full circles one descending on going up
-            thetas = torch.cat([
-                torch.arange(min_theta, max_theta, step=(max_theta - min_theta) / half_num_views, device=device),
-                torch.arange(max_theta, min_theta, step=(min_theta - max_theta) / half_num_views, device=device),
-            ])
+            thetas = torch.cat(
+                [
+                    torch.arange(
+                        min_theta,
+                        max_theta,
+                        step=(max_theta - min_theta) / half_num_views,
+                        device=device,
+                    ),
+                    torch.arange(
+                        max_theta,
+                        min_theta,
+                        step=(min_theta - max_theta) / half_num_views,
+                        device=device,
+                    ),
+                ]
+            )
 
         if min_phi == max_phi:
             phis = torch.full((num_views,), min_phi, device=device)
         else:
             # We're going to make two full circles one descending on going up
-            phis = torch.cat([
-                torch.arange(min_phi, max_phi, step=(max_phi - min_phi) / half_num_views, device=device),
-                torch.arange(min_phi, max_phi, step=(max_phi - min_phi) / half_num_views, device=device),
-            ])
+            phis = torch.cat(
+                [
+                    torch.arange(
+                        min_phi,
+                        max_phi,
+                        step=(max_phi - min_phi) / half_num_views,
+                        device=device,
+                    ),
+                    torch.arange(
+                        min_phi,
+                        max_phi,
+                        step=(max_phi - min_phi) / half_num_views,
+                        device=device,
+                    ),
+                ]
+            )
 
     # Radius
     if stochastic_views:
         ratio_with_dream_fusion = np.sqrt(3 * 0.5 ** 2) / 1.4  # DreamFusion
-        radius = (torch.rand(num_views, device=device) * 0.5 + 1) * ratio_with_dream_fusion
+        radius = (
+                         torch.rand(num_views, device=device) * 0.5 + 1
+                 ) * ratio_with_dream_fusion
     else:
-        radius = torch.tensor(1, device=device, dtype=torch.float)[None].expand(num_views)
+        radius = torch.tensor(1, device=device, dtype=torch.float)[None].expand(
+            num_views
+        )
     return thetas, phis, radius
 
 
 Sensors = Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+
+
 @torch.no_grad()
 def generate_sensors(
     image_height: int,
@@ -181,7 +344,7 @@ def generate_sensors(
     radius: torch.Tensor,
     scene_origin: Optional[torch.Tensor] = None,
 ) -> Sensors:
-    N, = phis.shape
+    (N,) = phis.shape
     device = phis.device
     dtype = phis.dtype
 
@@ -197,8 +360,8 @@ def generate_sensors(
     rot_theta[:, 2, 2] = cos_thetas
 
     phis = phis * np.pi / 180
-    sin_phis = torch.sin(phis) # [N,]
-    cos_phis = torch.cos(phis) # [N,]
+    sin_phis = torch.sin(phis)  # [N,]
+    cos_phis = torch.cos(phis)  # [N,]
 
     # Rotate according to z-axis
     rot_phi = torch.zeros(N, 3, 3, device=device, dtype=dtype)
@@ -208,17 +371,19 @@ def generate_sensors(
     rot_phi[:, 0, 1] = -sin_phis
     rot_phi[:, 1, 1] = cos_phis
 
-    rotations = rot_phi @ rot_theta # [N, 3, 3]
+    rotations = rot_phi @ rot_theta  # [N, 3, 3]
 
     # Origins
-    z = torch.stack([
-        torch.tensor(0)[None].expand(N),
-        torch.tensor(0)[None].expand(N),
-        radius,
-    ], dim=-1).to(device=device, dtype=dtype)
-    origins = \
-        torch.bmm(rotations, z[:, :, None]).squeeze(-1)  # [N, 3]
-        # + torch.tensor([0.5, 0.5, 0.5], device=angles.device, dtype=angles.dtype) # origin of the bounding box is 0
+    z = torch.stack(
+        [
+            torch.tensor(0)[None].expand(N),
+            torch.tensor(0)[None].expand(N),
+            radius,
+        ],
+        dim=-1,
+    ).to(device=device, dtype=dtype)
+    origins = torch.bmm(rotations, z[:, :, None]).squeeze(-1)  # [N, 3]
+    # + torch.tensor([0.5, 0.5, 0.5], device=angles.device, dtype=angles.dtype) # origin of the bounding box is 0
 
     if scene_origin is not None:
         # origins was estimated to be in the center, we now shift it to be pointing towards the center of the scene
@@ -227,7 +392,9 @@ def generate_sensors(
     # Camera specific values
     # TODO @thomasw21: define angle
     camera_angle_x = 45 * np.pi / 180
-    ratio = image_width / image_height # make sure that the pixels are actually square
+    ratio = (
+            image_width / image_height
+    )  # make sure that the pixels are actually square
     focal_x = 0.5 * image_height / np.tan(0.5 * camera_angle_x)
     focal_y = focal_x * ratio
     K = torch.tensor(
@@ -238,25 +405,26 @@ def generate_sensors(
             [0, 0, 0, 1],
         ],
         device=device,
-        dtype=dtype
+        dtype=dtype,
     )
 
     return rotations, origins, K
 
-### Rendering helpers
 
+# Rendering helpers
 def get_sigma_fn(
     query_density: Callable[[torch.Tensor], torch.Tensor],
     rays_o: torch.Tensor,
     rays_d: torch.Tensor,
     perturb: bool,
-) -> Callable[[torch.Tensor, torch.Tensor, torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
+) -> Callable[
+    [torch.Tensor, torch.Tensor, torch.Tensor],
+    Tuple[torch.Tensor, torch.Tensor],
+]:
     def sigma_fn(
-        t_starts: torch.Tensor,
-        t_ends: torch.Tensor,
-        ray_indices: torch.Tensor
+            t_starts: torch.Tensor, t_ends: torch.Tensor, ray_indices: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """ Query density values from a user-defined radiance field.
+        """Query density values from a user-defined radiance field.
         :params t_starts: Start of the sample interval along the ray. (n_samples, 1).
         :params t_ends: End of the sample interval along the ray. (n_samples, 1).
         :params ray_indices: Ray indices that each sample belongs to. (n_samples,).
@@ -267,26 +435,31 @@ def get_sigma_fn(
         t_dirs = rays_d[ray_indices]  # (n_samples, 3)
         # This essentially compute the mean position, we might instead jitter and randomly sample for robustness
         if perturb:
-            random_t = torch.rand_like(t_starts) * (t_ends - t_starts) + t_starts
+            random_t = (
+                    torch.rand_like(t_starts) * (t_ends - t_starts) + t_starts
+            )
             positions = t_origins + t_dirs * random_t
         else:
             positions = t_origins + t_dirs * (t_starts + t_ends) / 2.0
         sigmas = query_density(positions)
         return sigmas, positions  # (n_samples, 1)
+
     return sigma_fn
+
 
 def get_rgb_sigma_fn(
     radiance_field: nn.Module,
     rays_o: torch.Tensor,
     rays_d: torch.Tensor,
-    perturb: bool
-) -> Callable[[torch.Tensor, torch.Tensor, torch.Tensor], Tuple[torch.Tensor, torch.Tensor,  torch.Tensor]]:
+    perturb: bool,
+) -> Callable[
+    [torch.Tensor, torch.Tensor, torch.Tensor],
+    Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+]:
     def rgb_sigma_fn(
-        t_starts: torch.Tensor,
-        t_ends: torch.Tensor,
-        ray_indices: torch.Tensor
+            t_starts: torch.Tensor, t_ends: torch.Tensor, ray_indices: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """ Query rgb and density values from a user-defined radiance field.
+        """Query rgb and density values from a user-defined radiance field.
         :params t_starts: Start of the sample interval along the ray. (n_samples, 1).
         :params t_ends: End of the sample interval along the ray. (n_samples, 1).
         :params ray_indices: Ray indices that each sample belongs to. (n_samples,).
@@ -297,12 +470,15 @@ def get_rgb_sigma_fn(
         t_dirs = rays_d[ray_indices]  # (n_samples, 3)
         # This essentially compute the mean position, we might instead jitter and randomly sample for robustness
         if perturb:
-            random_t = torch.rand_like(t_starts) * (t_ends - t_starts) + t_starts
+            random_t = (
+                    torch.rand_like(t_starts) * (t_ends - t_starts) + t_starts
+            )
             positions = t_origins + t_dirs * random_t
         else:
             positions = t_origins + t_dirs * (t_starts + t_ends) / 2.0
         rgbs, sigmas = radiance_field(positions, t_dirs)
         return rgbs, sigmas, positions  # (n_samples, 3), (n_samples, 1)
+
     return rgb_sigma_fn
 
 
@@ -330,36 +506,61 @@ def render_images(
     # Compute which rays we should run
     # # We for now compute the center of each pixel, thus the 0.5
     # # Get help: https://www.cs.cmu.edu/~16385/s17/Slides/11.1_Camera_matrix.pdf
-    assert camera_intrinsics[0,0] == camera_intrinsics[1,1], "focal needs to be the same in x and y"
+    assert (
+            camera_intrinsics[0, 0] == camera_intrinsics[1, 1]
+    ), "focal needs to be the same in x and y"
     x, y = torch.meshgrid(
-        torch.arange(image_height, device=device) - camera_intrinsics[0, 2] + 0.5,
-        torch.arange(image_width, device=device) - camera_intrinsics[1, 2] + 0.5,
+        torch.arange(image_height, device=device)
+        - camera_intrinsics[0, 2]
+        + 0.5,
+        torch.arange(image_width, device=device)
+        - camera_intrinsics[1, 2]
+        + 0.5,
         indexing="ij",
-    ) # [H, W]
+    )  # [H, W]
     # TODO @thomasw21: sample from gaussian instead though it probably needs to be bounded.
     if stochastic_rays_through_pixels:
         x = x + torch.rand_like(x) - 0.5
         y = y + torch.rand_like(y) - 0.5
-    pixel_position_in_camera = torch.stack([
-        x,
-        y,
-        - camera_intrinsics[0, 0][None, None].expand(image_height, image_height)
-    ], dim=-1) / camera_intrinsics[0,0] # [H, W, 3]
+    pixel_position_in_camera = (
+            torch.stack(
+                [
+                    x,
+                    y,
+                    -camera_intrinsics[0, 0][None, None].expand(
+                        image_height, image_height
+                    ),
+                ],
+                dim=-1,
+            )
+            / camera_intrinsics[0, 0]
+    )  # [H, W, 3]
     # Assume that the cameras are looking at the origin 0.
-    directions = (camera_rotations[:, None, :, :] @ pixel_position_in_camera.view(1, image_height * image_width, 3, 1)).squeeze(-1) # [N, H, W, 3]
+    directions = (
+            camera_rotations[:, None, :, :]
+            @ pixel_position_in_camera.view(1, image_height * image_width, 3, 1)
+    ).squeeze(
+        -1
+    )  # [N, H, W, 3]
     # pixel_position_in_world = directions + C[:, None, None, :]
-    view_dirs = (directions / torch.linalg.norm(directions, dim=-1)[..., None]).view(-1, 3) # [N * image_height * image_width, 3]
+    view_dirs = (
+            directions / torch.linalg.norm(directions, dim=-1)[..., None]
+    ).view(
+        -1, 3
+    )  # [N * image_height * image_width, 3]
     # TODO @thomasw21: Figure out a way without copying data
-    origins = torch.repeat_interleave(camera_centers, image_height * image_height, dim=0)
+    origins = torch.repeat_interleave(
+        camera_centers, image_height * image_height, dim=0
+    )
 
     #### From nerfacc README:
     # Efficient Raymarching: Skip empty and occluded space, pack samples from all rays.
     # packed_info: (n_rays, 2). t_starts: (n_samples, 1). t_ends: (n_samples, 1).
     # TODO @thomasw21: determine the chunk size
-    chunk = 2**15
+    chunk = 2 ** 15
     results = []
     sum_sigmas = 0
-    numerator = torch.tensor([0., 0., 0.], device=device, dtype=torch.float)
+    numerator = torch.tensor([0.0, 0.0, 0.0], device=device, dtype=torch.float)
     for i in range(0, N * image_height * image_width, chunk):
         origins_shard = origins[i: i + chunk]
         view_dirs_shard = view_dirs[i: i + chunk]
@@ -368,26 +569,33 @@ def render_images(
                 rays_o=origins_shard,
                 rays_d=view_dirs_shard,
                 sigma_fn=None,
-                scene_aabb=aabb, # TODO @thomasw21: Need to pass it down otherwise this is going to be hell
-                grid=occupancy_grid, # This is fucked
+                scene_aabb=aabb,  # TODO @thomasw21: Need to pass it down otherwise this is going to be hell
+                grid=occupancy_grid,  # This is fucked
                 # near_plane=0.2,
                 # far_plane=1.0,
                 early_stop_eps=0.0,
                 # alpha_thre=1e-4, # nerfstudio uses 1e-4, default is 0.0
-                stratified=False
+                stratified=False,
             )
 
-            sigma_fn = get_sigma_fn(query_density, rays_o=origins_shard, rays_d=view_dirs_shard, perturb=stratified)
+            sigma_fn = get_sigma_fn(
+                query_density,
+                rays_o=origins_shard,
+                rays_d=view_dirs_shard,
+                perturb=stratified,
+            )
             if ray_resample:
                 # Select only visible segments
                 # Query sigma without gradients
                 ray_indices = unpack_info(packed_info)
-                sigmas, positions = sigma_fn(t_starts, t_ends, ray_indices.long())
+                sigmas, positions = sigma_fn(
+                    t_starts, t_ends, ray_indices.long()
+                )
                 weights = nerfacc.render_weight_from_density(
                     packed_info=packed_info,
                     t_starts=t_starts,
                     t_ends=t_ends,
-                    sigmas=sigmas
+                    sigmas=sigmas,
                 )
                 packed_info, t_starts, t_ends = nerfacc.ray_resampling(
                     packed_info=packed_info,
@@ -401,10 +609,14 @@ def render_images(
                 # Select only visible segments
                 # Query sigma without gradients
                 ray_indices = unpack_info(packed_info)
-                sigmas, positions = sigma_fn(t_starts, t_ends, ray_indices.long())
+                sigmas, positions = sigma_fn(
+                    t_starts, t_ends, ray_indices.long()
+                )
                 assert (
                         sigmas.shape == t_starts.shape
-                ), "sigmas must have shape of (N, 1)! Got {}".format(sigmas.shape)
+                ), "sigmas must have shape of (N, 1)! Got {}".format(
+                    sigmas.shape
+                )
                 alphas = 1.0 - torch.exp(-sigmas * (t_ends - t_starts))
 
                 # Compute visibility of the samples, and filter out invisible samples
@@ -412,7 +624,7 @@ def render_images(
                     packed_info,
                     alphas=alphas,
                     early_stop_eps=0.0,
-                    alpha_thre=1e-4
+                    alpha_thre=1e-4,
                 )
                 t_starts, t_ends = t_starts[visibility], t_ends[visibility]
                 packed_info = packed_info_visible
@@ -425,7 +637,12 @@ def render_images(
 
         # Differentiable Volumetric Rendering.
         # colors: (n_rays, 3). opacity: (n_rays, 1). depth: (n_rays, 1).
-        rgb_sigma_fn = get_rgb_sigma_fn(radiance_field, rays_o=origins_shard, rays_d=view_dirs_shard, perturb=stratified)
+        rgb_sigma_fn = get_rgb_sigma_fn(
+            radiance_field,
+            rays_o=origins_shard,
+            rays_d=view_dirs_shard,
+            perturb=stratified,
+        )
         color, opacity, depth = nerfacc.rendering(
             rgb_sigma_fn=lambda *args: rgb_sigma_fn(*args)[:2],
             packed_info=packed_info,
@@ -436,12 +653,15 @@ def render_images(
 
         # Compute sigma loss to force the model to be at the center
 
-    color = torch.cat([elt[0] for elt in results], dim=0).view(N, image_height, image_width, 3)
-    opacity = torch.cat([elt[1] for elt in results], dim=0).view(N, image_height, image_width, 1)
+    color = torch.cat([elt[0] for elt in results], dim=0).view(
+        N, image_height, image_width, 3
+    )
+    opacity = torch.cat([elt[1] for elt in results], dim=0).view(
+        N, image_height, image_width, 1
+    )
 
     density_origin = numerator / sum_sigmas
     return color, opacity, density_origin
-
 
 
 class Background(Enum):
@@ -451,29 +671,33 @@ class Background(Enum):
     CHECKERBOARD = 4
     WHITE = 5
     BLACK = 6
+    LEARNED = 7
+
 
 def add_background(
     color: torch.Tensor,
     opacity: torch.Tensor,
-    backgrounds: List[Optional[Background]],
-    blur_background: bool = True
+    sensors: Sensors,
+    backgrounds: List[Optional[Tuple[Background, Any]]],
+    blur_background: bool = True,
 ):
     N, H, W, _ = color.shape
 
     # Background
     background_colors = torch.empty_like(color)
     for i, background in enumerate(backgrounds):
+        enum, value = background
         # Single colored background
         if background is None:
             # Hack as it shouldn't change anything
             background_color = color[i]
-        elif background is background.RANDOM_COLOR_UNIFORM_BACKGROUND:
+        elif enum is Background.RANDOM_COLOR_UNIFORM_BACKGROUND:
             background_color = torch.rand(1, 1, 3, device=color.device)
-        elif background is background.RANDOM_COLOR_BACKGROUND:
+        elif enum is Background.RANDOM_COLOR_BACKGROUND:
             background_color = torch.rand(H, W, 3, device=color.device)
-        elif background is background.RANDOM_TEXTURE:
+        elif enum is Background.RANDOM_TEXTURE:
             raise NotImplementedError
-        elif background is background.CHECKERBOARD:
+        elif enum is Background.CHECKERBOARD:
             # https://github.com/google-research/google-research/blob/4f54cade26f40728be7fda05c89011f89b7b7b7f/dreamfields/experiments/diffusion_3d/augment.py#L40
             nsq_x = 8
             nsq_y = 8
@@ -482,57 +706,83 @@ def add_background(
             sq_x = H // nsq_x
             sq_y = W // nsq_y
             color1, color2 = torch.rand(2, 3, device=color.device)
-            background_color = color1[None, None, :].repeat(H, W, 1).view(nsq_x, sq_x, nsq_y, sq_y, 3)
-            background_color[::2, :, 1::2, :, :] = color2[None, None, None, None, :]
-            background_color[1::2, :, ::2, :, :] = color2[None, None, None, None, :]
+            background_color = (
+                color1[None, None, :]
+                .repeat(H, W, 1)
+                .view(nsq_x, sq_x, nsq_y, sq_y, 3)
+            )
+            background_color[::2, :, 1::2, :, :] = color2[
+                                                   None, None, None, None, :
+                                                   ]
+            background_color[1::2, :, ::2, :, :] = color2[
+                                                   None, None, None, None, :
+                                                   ]
             background_color = background_color.view(H, W, 3)
-        elif background is background.WHITE:
+        elif enum is Background.WHITE:
             background_color = torch.ones(1, 1, 1, device=color.device)
-        elif background is background.BLACK:
+        elif enum is Background.BLACK:
             background_color = torch.zeros(1, 1, 1, device=color.device)
+        elif enum is Background.LEARNED:
+            _, camera_centers, _ = sensors
+            # We assume that camera always look at the center which is 0.0.0
+            # TODO @thomasw21: remove previous assumption.
+            viewing_directions = (
+                    -camera_centers
+                    / torch.linalg.norm(camera_centers, dim=-1)[..., None]
+            )
+            # value is assumed to be a MLPBackground
+            assert isinstance(value, MLPBackground)
+            background_color = value(viewing_directions)
         else:
             raise ValueError
 
         if blur_background:
-            min_blur, max_blur = (0.0, 10.)
-            sigma_x, sigma_y = np.random.rand(2) * (max_blur - min_blur) + min_blur
+            min_blur, max_blur = (0.0, 10.0)
+            sigma_x, sigma_y = (
+                    np.random.rand(2) * (max_blur - min_blur) + min_blur
+            )
             background_color = F.gaussian_blur(
-                torch.broadcast_to(background_color, (H, W, 3)).permute(2, 0, 1),
+                torch.broadcast_to(background_color, (H, W, 3)).permute(
+                    2, 0, 1
+                ),
                 kernel_size=[15, 15],
                 # Weird, but it's in dreamfields https://github.com/google-research/google-research/blob/00392d6e3bd30bfe706859287035fcd8d53a010b/dreamfields/dreamfields/config/config_base.py#L130
-                sigma=[sigma_x, sigma_y]
+                sigma=[sigma_x, sigma_y],
             ).permute(1, 2, 0)
 
         background_colors[i] = background_color
 
     return color * opacity + background_colors * (1 - opacity)
 
+
 def data_augment(
     color: torch.Tensor,
     opacity: torch.Tensor,
-    resize_shape: Tuple[int,int],
+    sensors: Sensors,
+    resize_shape: Tuple[int, int],
     random_resize_crop: bool,
     # TODO @thomasw21: Make random background color accessible through CLI
-    backgrounds: Optional[List[Optional[Background]]],
+    backgrounds: Optional[List[Optional[Tuple[Background, Any]]]],
     blur_background: bool,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     N, H, W, _ = color.shape
     # Do random crop
-    img = torch.cat([
-        color.permute(3, 0, 1, 2),
-        opacity.permute(3, 0, 1, 2)
-    ])
+    img = torch.cat([color.permute(3, 0, 1, 2), opacity.permute(3, 0, 1, 2)])
     if random_resize_crop:
-        transforms = torchvision.transforms.Compose([
-            # DreamFields
-            # torchvision.transforms.RandomResizedCrop(size=resize_shape, scale=(0.80, 1.0))
-            torchvision.transforms.Resize(size=resize_shape)
-        ])
+        transforms = torchvision.transforms.Compose(
+            [
+                # DreamFields
+                # torchvision.transforms.RandomResizedCrop(size=resize_shape, scale=(0.80, 1.0))
+                torchvision.transforms.Resize(size=resize_shape)
+            ]
+        )
     else:
-        transforms = torchvision.transforms.Compose([
-            # DreamFields
-            torchvision.transforms.Resize(size=resize_shape)
-        ])
+        transforms = torchvision.transforms.Compose(
+            [
+                # DreamFields
+                torchvision.transforms.Resize(size=resize_shape)
+            ]
+        )
     img = transforms(img)
     assert color.shape[-1] == 3
     assert opacity.shape[-1] == 1
@@ -540,19 +790,23 @@ def data_augment(
     opacity = img[-1:].permute(1, 2, 3, 0)
 
     if backgrounds is not None:
-        color = add_background(color=color, opacity=opacity, backgrounds=backgrounds, blur_background=blur_background)
+        color = add_background(
+            color=color,
+            opacity=opacity,
+            sensors=sensors,
+            backgrounds=backgrounds,
+            blur_background=blur_background,
+        )
 
     return color, opacity
+
 
 def save_model(radiance_field: nn.Module, path: Path):
     print(f"Saving model to {path.absolute()}")
     torch.save(radiance_field.state_dict(), path)
 
-def save_images(
-    path: Path,
-    images: torch.Tensor,
-    opacities: torch.Tensor
-):
+
+def save_images(path: Path, images: torch.Tensor, opacities: torch.Tensor, sensors: Sensors):
     """For each image save one with black background and the other one with white background"""
     path.parent.mkdir(parents=True, exist_ok=True)
     print(f"Saving images to {path.absolute()}")
@@ -563,12 +817,13 @@ def save_images(
     images = add_background(
         color=images,
         opacity=opacities,
+        sensors=sensors,
         backgrounds=[Background.WHITE for _ in range(len(images))],
-        blur_background=False
+        blur_background=False,
     )
     save_image(
         tensor=images.permute(0, 3, 1, 2),
-        fp=path.parent / f"{path.stem}_white{path.suffix}"
+        fp=path.parent / f"{path.stem}_white{path.suffix}",
     )
 
 
@@ -582,17 +837,20 @@ def main():
 
     # Setup neural network blocks
     from radiance_fields.ngp import NGPradianceField
+
     radiance_field = NGPradianceField(
         aabb=args.aabb,
         unbounded=args.unbounded,
         use_viewdirs=args.use_viewdirs,
         # original_sigma_offset=1, # This is in order to force the model to be opaque at init, if I could I would update the weight directl
         original_sigma_offset=-1,
-        spatial_density_bias=True
+        spatial_density_bias=True,
     ).to(device)
     # Load pretrained weights
     if args.load_model_path is not None:
-        radiance_field.load_state_dict(torch.load(args.load_model_path, map_location=device))
+        radiance_field.load_state_dict(
+            torch.load(args.load_model_path, map_location=device)
+        )
 
     # Optimizer only on 3D object
     # TODO @thomasw21: Determine if we run tcnn.optimizers
@@ -600,7 +858,9 @@ def main():
 
     optimizer = torch.optim.AdamW(radiance_field.get_params(args.learning_rate))
     # optimizer = torch.optim.Adam(radiance_field.get_params(args.learning_rate))
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda iter: 0.1 ** min(iter / args.iterations, 1))
+    scheduler = torch.optim.lr_scheduler.LambdaLR(
+        optimizer, lambda iter: 0.1 ** min(iter / args.iterations, 1)
+    )
 
     # Image and text scorer
     if args.text_image_discriminator == "clip":
@@ -608,7 +868,9 @@ def main():
     elif args.text_image_discriminator == "sd":
         text_image_discriminator = SDTextImageDiscriminator().to(device)
     else:
-        raise ValueError(f"Invalid choice of text image disciminator. Got: {args.text_image_discriminator}")
+        raise ValueError(
+            f"Invalid choice of text image disciminator. Got: {args.text_image_discriminator}"
+        )
     # Freeze all CLIP weights.
     text_image_discriminator.eval()
     for name, params in text_image_discriminator.named_parameters():
@@ -621,11 +883,11 @@ def main():
             resolution=args.grid_resolution,
             contraction_type=ContractionType.AABB,
         ).to(device)
-        aabb = None # It's already stored in `occupancy_grid`
+        aabb = None  # It's already stored in `occupancy_grid`
     else:
         occupancy_grid = None
         aabb = torch.tensor(args.aabb, device=device)
-    scene_origin = torch.tensor([0., 0., 0.], device="cpu")
+    scene_origin = torch.tensor([0.0, 0.0, 0.0], device="cpu")
 
     # Precompute all text embeddings
     prompter = ViewDependentPrompter(args.text)
@@ -636,19 +898,24 @@ def main():
             for text in all_texts
         }
 
-    # background probabilities
-    training_background_probs = {
-        Background.RANDOM_COLOR_UNIFORM_BACKGROUND: 1,
-        Background.RANDOM_COLOR_BACKGROUND: 1,
-        Background.CHECKERBOARD: 1,
-        # Should already be handled by `Background.RANDOM_COLOR_UNIFORM_BACKGROUND`
-        # Background.WHITE: 1,
-        # Background.BLACK: 1
-        # TODO @thomasw21: Implement
-        # Background.RANDOM_TEXTURE: 1,
-    }
-    training_backgrounds = list(training_background_probs.keys())
-
+    # background
+    # Dictionary, keys: background name, values: (probability, additional values)
+    training_backgrounds: Dict[Background, Tuple[int, Any]]
+    if args.background == "random_backgrounds":
+        training_backgrounds = {
+            Background.RANDOM_COLOR_UNIFORM_BACKGROUND: (1, None),
+            Background.RANDOM_COLOR_BACKGROUND: (1, None),
+            Background.CHECKERBOARD: (1, None),
+            # Should already be handled by `Background.RANDOM_COLOR_UNIFORM_BACKGROUND`
+            # Background.WHITE: (1,None),
+            # Background.BLACK: (1,None)
+            # TODO @thomasw21: Implement
+            # Background.RANDOM_TEXTURE: (1,None),
+        }
+    elif args.background == "learned_background":
+        training_backgrounds = {Background.LEARNED: (1, MLPBackground())}
+    else:
+        raise ValueError(f"Invalid choice of background. Got {args.background}")
 
     # training
     start_time = time.time()
@@ -666,16 +933,20 @@ def main():
         with torch.no_grad():
             thetas, phis, radius = generate_random_views(
                 num_views=args.batch_size,
-                device=torch.device("cpu"), # no need to to everything in GPU
+                device=torch.device("cpu"),  # no need to to everything in GPU
                 theta_range=args.training_thetas,
                 phi_range=args.training_phis,
-                stochastic_views=True
+                stochastic_views=True,
             )
 
             # Generate a view dependent prompt
-            encoded_texts = torch.cat([
-                text_to_encodings[prompter.get_camera_view_prompt(theta=theta, phi=phi)]
-                for theta, phi in zip(thetas, phis)]
+            encoded_texts = torch.cat(
+                [
+                    text_to_encodings[
+                        prompter.get_camera_view_prompt(theta=theta, phi=phi)
+                    ]
+                    for theta, phi in zip(thetas, phis)
+                ]
             )
 
             sensors = generate_sensors(
@@ -684,14 +955,18 @@ def main():
                 thetas=thetas,
                 phis=phis,
                 radius=radius,
-                scene_origin=scene_origin
+                scene_origin=scene_origin,
             )
             sensors = tuple(elt.to(device) for elt in sensors)
 
         # Update sparse occupancy matrix every n steps
         # Essentially there's a bunch of values that I don't care about since I can just set them to zero once and for all
         # We update the scene origin as well
-        if args.use_occupancy_grid and args.update_occupancy_grid_interval != 0 and it % args.update_occupancy_grid_interval == 0:
+        if (
+            args.use_occupancy_grid
+            and args.update_occupancy_grid_interval != 0
+            and it % args.update_occupancy_grid_interval == 0
+        ):
             # TODO @thomasw21: we're not using their official API, though I'm more than okay with this
             occupancy_grid._update(
                 step=it,
@@ -721,30 +996,47 @@ def main():
         images, opacities = data_augment(
             images,
             opacities,
+            sensors=sensors,
             random_resize_crop=True,
             resize_shape=text_image_discriminator.image_height_width,
             backgrounds=choices(
-                training_backgrounds,
-                weights=[training_background_probs[bkd] for bkd in training_backgrounds],
-                k=args.batch_size
+                list((k, v[1]) for k, v in training_backgrounds.items()),
+                weights=[
+                    training_backgrounds[bkd][0] for bkd in training_backgrounds
+                ],
+                k=args.batch_size,
             ),
-            blur_background=True
+            blur_background=True,
         )
 
         # Discriminate images with text
-        images = images.permute(0, 3, 1, 2) # [B, H, W, C] -> [B, C, H, W]
-        encoded_images = text_image_discriminator.encode_images(images, encoded_texts=encoded_texts)
-        scores = text_image_discriminator(encoded_images=encoded_images, encoded_texts=encoded_texts)
+        images = images.permute(0, 3, 1, 2)  # [B, H, W, C] -> [B, C, H, W]
+        encoded_images = text_image_discriminator.encode_images(
+            images, encoded_texts=encoded_texts
+        )
+        scores = text_image_discriminator(
+            encoded_images=encoded_images, encoded_texts=encoded_texts
+        )
         mean_score = scores.mean()
 
         ### Compute loss
         sublosses = [mean_score]
         if args.lambda_transmittance_loss > 0:
-            t = min(it / args.transmittance_loss_ceil_exponential_annealing_step, 1)
+            t = min(
+                it / args.transmittance_loss_ceil_exponential_annealing_step, 1
+            )
             min_, max_ = args.transmittance_loss_ceil_range
-            transmittance_loss_ceil = np.exp(np.log(min_) * (1 - t) + np.log(max_) * t)
+            transmittance_loss_ceil = np.exp(
+                np.log(min_) * (1 - t) + np.log(max_) * t
+            )
             sublosses.append(
-                - args.lambda_transmittance_loss * torch.mean(torch.clamp(1 - torch.mean(opacities, (1,2)), max=transmittance_loss_ceil))
+                -args.lambda_transmittance_loss
+                * torch.mean(
+                    torch.clamp(
+                        1 - torch.mean(opacities, (1, 2)),
+                        max=transmittance_loss_ceil,
+                    )
+                )
             )
 
         # Compute entropy
@@ -752,15 +1044,17 @@ def main():
         if args.lambda_transmittance_entropy > 0:
             clamped_opacities = torch.clamp(opacities, min=1e-6, max=1 - 1e-6)
             minus_clamped_opacities = 1 - clamped_opacities
-            entropy = torch.mean( - clamped_opacities * torch.log(clamped_opacities) - minus_clamped_opacities * torch.log(minus_clamped_opacities))
-            sublosses.append(
-                args.lambda_transmittance_entropy * entropy
+            entropy = torch.mean(
+                -clamped_opacities * torch.log(clamped_opacities)
+                - minus_clamped_opacities * torch.log(minus_clamped_opacities)
             )
+            sublosses.append(args.lambda_transmittance_entropy * entropy)
 
         if args.lambda_opacity > 0:
             sublosses.append(
                 # args.lambda_opacity * torch.mean(torch.sqrt(opacities ** 2 + 0.01))
-                args.lambda_opacity * torch.mean(opacities)
+                args.lambda_opacity
+                * torch.mean(opacities)
             )
 
         # Compute loss
@@ -775,7 +1069,10 @@ def main():
 
         # Update scene origin
         if args.track_scene_origin_decay < 1:
-            scene_origin = args.track_scene_origin_decay * scene_origin.to("cpu") + (1 - args.track_scene_origin_decay) * density_origin
+            scene_origin = (
+                    args.track_scene_origin_decay * scene_origin.to("cpu")
+                    + (1 - args.track_scene_origin_decay) * density_origin
+            )
 
         # Log loss
         if it % args.log_interval == 0:
@@ -797,25 +1094,28 @@ def main():
             radiance_field.eval()
             with torch.no_grad():
                 # image_height, image_width = text_image_discriminator.image_height_width
-                validation_image_height, validation_image_width = args.validation_resolution
+                (
+                    validation_image_height,
+                    validation_image_width,
+                ) = args.validation_resolution
 
                 thetas, phis, radius = generate_random_views(
                     8,
                     device=torch.device("cpu"),
                     stochastic_views=False,
                     theta_range=args.validation_thetas,
-                    phi_range=args.validation_phis
+                    phi_range=args.validation_phis,
                 )
 
-
-                R, C, K = generate_sensors(
+                sensors = generate_sensors(
                     image_height=validation_image_height,
                     image_width=validation_image_width,
                     thetas=thetas,
                     phis=phis,
                     radius=radius,
-                    scene_origin=scene_origin
+                    scene_origin=scene_origin,
                 )
+                sensors = tuple(elt.to(device) for elt in sensors)
                 images, opacities, _ = render_images(
                     radiance_field,
                     query_density=radiance_field.query_density,
@@ -824,32 +1124,37 @@ def main():
                     aabb=aabb,
                     image_height=validation_image_height,
                     image_width=validation_image_width,
-                    sensors=(R.to(device), C.to(device), K.to(device)),
+                    sensors=sensors,
                     stochastic_rays_through_pixels=False,
                     ray_resample=False,
-                    stratified=False
+                    stratified=False,
                 )
 
                 # Resize image to correct shape
                 images, opacities = data_augment(
                     images,
                     opacities,
+                    sensors=sensors,
                     random_resize_crop=False,
                     resize_shape=text_image_discriminator.image_height_width,
                     backgrounds=None,
-                    blur_background=False
+                    blur_background=False,
                 )
-
 
                 ### Compute loss
                 channel_first_images = images.permute(0, 3, 1, 2)
-                encoded_texts = torch.cat([
-                    text_to_encodings[prompter.get_camera_view_prompt(theta=theta, phi=phi)]
-                    for theta, phi in zip(thetas, phis)
-                ])
+                encoded_texts = torch.cat(
+                    [
+                        text_to_encodings[
+                            prompter.get_camera_view_prompt(
+                                theta=theta, phi=phi
+                            )
+                        ]
+                        for theta, phi in zip(thetas, phis)
+                    ]
+                )
                 encoded_images = text_image_discriminator.encode_images(
-                    channel_first_images,
-                    encoded_texts=encoded_texts
+                    channel_first_images, encoded_texts=encoded_texts
                 )
 
                 chunk_size = 8
@@ -857,16 +1162,26 @@ def main():
                 text_image_ratio = len(encoded_texts) // len(encoded_images)
                 for start in range(0, len(encoded_images), chunk_size):
                     end = start + chunk_size
-                    encoded_images_chunk = encoded_images[start: end]
-                    encoded_texts_chunk = encoded_texts[text_image_ratio * start: text_image_ratio * end]
-                    scores.append(text_image_discriminator(encoded_images=encoded_images_chunk,
-                                                           encoded_texts=encoded_texts_chunk))
+                    encoded_images_chunk = encoded_images[start:end]
+                    encoded_texts_chunk = encoded_texts[
+                                          text_image_ratio * start: text_image_ratio * end
+                                          ]
+                    scores.append(
+                        text_image_discriminator(
+                            encoded_images=encoded_images_chunk,
+                            encoded_texts=encoded_texts_chunk,
+                        )
+                    )
                 mean_score = torch.cat(scores).mean()
 
                 save_images(
                     images=images,
                     opacities=opacities,
-                    path=args.save_images_path / "validation" / f"{it}-of-{args.iterations}" / "result.jpg"
+                    sensors=sensors,
+                    path=args.save_images_path
+                         / "validation"
+                         / f"{it}-of-{args.iterations}"
+                         / "result.jpg",
                 )
 
             print("##### validation")
@@ -888,10 +1203,9 @@ def main():
             device=torch.device("cpu"),
             stochastic_views=False,
             theta_range=args.validation_thetas,
-            phi_range=args.validation_phis
+            phi_range=args.validation_phis,
         )
-        # TODO @thomasw21: define resolution
-        R, C, K = generate_sensors(
+        sensors = generate_sensors(
             image_height=args.validation_resolution[0],
             image_width=args.validation_resolution[1],
             thetas=thetas,
@@ -899,6 +1213,7 @@ def main():
             radius=radius,
             scene_origin=scene_origin,
         )
+        sensors = tuple(elt.to(device) for elt in sensors)
         images, opacities, _ = render_images(
             radiance_field,
             query_density=radiance_field.query_density,
@@ -907,22 +1222,27 @@ def main():
             aabb=aabb,
             image_height=args.validation_resolution[0],
             image_width=args.validation_resolution[1],
-            sensors=(R.to(device), C.to(device), K.to(device)),
+            sensors=sensors,
             stochastic_rays_through_pixels=False,
             ray_resample=False,
-            stratified=False
+            stratified=False,
         )
 
         ### Compute loss
         channel_first_images = images.permute(0, 3, 1, 2)
-        resized_channel_first_images = F.resize(channel_first_images, text_image_discriminator.image_height_width)
-        encoded_texts = torch.cat([
-            text_to_encodings[prompter.get_camera_view_prompt(theta=theta, phi=phi)]
-            for theta, phi in zip(thetas, phis)
-        ])
+        resized_channel_first_images = F.resize(
+            channel_first_images, text_image_discriminator.image_height_width
+        )
+        encoded_texts = torch.cat(
+            [
+                text_to_encodings[
+                    prompter.get_camera_view_prompt(theta=theta, phi=phi)
+                ]
+                for theta, phi in zip(thetas, phis)
+            ]
+        )
         encoded_images = text_image_discriminator.encode_images(
-            resized_channel_first_images,
-            encoded_texts=encoded_texts
+            resized_channel_first_images, encoded_texts=encoded_texts
         )
 
         chunk_size = 8
@@ -930,9 +1250,16 @@ def main():
         text_image_ratio = len(encoded_texts) // len(encoded_images)
         for start in range(0, len(encoded_images), chunk_size):
             end = start + chunk_size
-            encoded_images_chunk = encoded_images[start: end]
-            encoded_texts_chunk = encoded_texts[text_image_ratio * start: text_image_ratio * end]
-            scores.append(text_image_discriminator(encoded_images=encoded_images_chunk, encoded_texts=encoded_texts_chunk))
+            encoded_images_chunk = encoded_images[start:end]
+            encoded_texts_chunk = encoded_texts[
+                text_image_ratio * start: text_image_ratio * end
+            ]
+            scores.append(
+                text_image_discriminator(
+                    encoded_images=encoded_images_chunk,
+                    encoded_texts=encoded_texts_chunk,
+                )
+            )
         mean_score = torch.cat(scores).mean()
 
         ### Logs
@@ -947,7 +1274,8 @@ def main():
         save_images(
             images=images,
             opacities=opacities,
-            path=args.save_images_path / "final.jpg"
+            sensors=sensors,
+            path=args.save_images_path / "final.jpg",
         )
 
 
