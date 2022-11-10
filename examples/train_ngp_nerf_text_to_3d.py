@@ -850,7 +850,7 @@ def main():
         radiance_field.load_state_dict(
             torch.load(args.load_model_path, map_location=device)
         )
-    trainable_params = radiance_field.get_params(args.lr)
+    trainable_params = radiance_field.get_params(args.learning_rate)
 
     # Image and text scorer
     if args.text_image_discriminator == "clip":
@@ -905,7 +905,7 @@ def main():
     elif args.background == "learned_background":
         background_model = MLPBackground().to(device)
         training_backgrounds = {Background.LEARNED: (1, background_model)}
-        trainable_params += background_model.get_params(args.lr)
+        trainable_params += background_model.get_params(args.learning_rate)
     else:
         raise ValueError(f"Invalid choice of background. Got {args.background}")
 
