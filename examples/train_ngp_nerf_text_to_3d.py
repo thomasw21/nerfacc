@@ -481,7 +481,7 @@ def get_rgb_sigma_fn(
 
     return rgb_sigma_fn
 
-
+Rays = Tuple[torch.Tensor, torch.Tensor]
 def render_images(
     radiance_field: nn.Module,
     query_density: Callable[[torch.Tensor], torch.Tensor],
@@ -493,7 +493,7 @@ def render_images(
     ray_resample: bool = False,
     stochastic_rays_through_pixels: bool = False,
     stratified: bool = False,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Rays]:
     device = sensors[0].device
     camera_rotations, camera_centers, camera_intrinsics = sensors
     N = camera_rotations.shape[0]
@@ -661,7 +661,7 @@ def render_images(
     )
 
     density_origin = numerator / sum_sigmas
-    return color, opacity, density_origin
+    return color, opacity, density_origin, (origins, view_dirs)
 
 
 class Background(Enum):
@@ -677,7 +677,7 @@ class Background(Enum):
 def add_background(
     color: torch.Tensor,
     opacity: torch.Tensor,
-    sensors: Sensors,
+    rays: Rays,
     backgrounds: List[Optional[Tuple[Background, Any]]],
     blur_background: bool = True,
 ):
@@ -723,16 +723,10 @@ def add_background(
         elif enum is Background.BLACK:
             background_color = torch.zeros(1, 1, 1, device=color.device)
         elif enum is Background.LEARNED:
-            _, camera_centers, _ = sensors
-            # We assume that camera always look at the center which is 0.0.0
-            # TODO @thomasw21: remove previous assumption.
-            viewing_directions = (
-                    -camera_centers
-                    / torch.linalg.norm(camera_centers, dim=-1)[..., None]
-            )
+            _, view_dirs = rays
             # value is assumed to be a MLPBackground
             assert isinstance(value, MLPBackground)
-            background_color = value(viewing_directions)
+            background_color = value(view_dirs)
         else:
             raise ValueError
 
@@ -758,7 +752,7 @@ def add_background(
 def data_augment(
     color: torch.Tensor,
     opacity: torch.Tensor,
-    sensors: Sensors,
+    rays: Rays,
     resize_shape: Tuple[int, int],
     random_resize_crop: bool,
     # TODO @thomasw21: Make random background color accessible through CLI
@@ -793,7 +787,7 @@ def data_augment(
         color = add_background(
             color=color,
             opacity=opacity,
-            sensors=sensors,
+            rays=rays,
             backgrounds=backgrounds,
             blur_background=blur_background,
         )
@@ -806,7 +800,7 @@ def save_model(radiance_field: nn.Module, path: Path):
     torch.save(radiance_field.state_dict(), path)
 
 
-def save_images(path: Path, images: torch.Tensor, opacities: torch.Tensor, sensors: Sensors):
+def save_images(path: Path, images: torch.Tensor, opacities: torch.Tensor, rays: Rays):
     """For each image save one with black background and the other one with white background"""
     path.parent.mkdir(parents=True, exist_ok=True)
     print(f"Saving images to {path.absolute()}")
@@ -817,7 +811,7 @@ def save_images(path: Path, images: torch.Tensor, opacities: torch.Tensor, senso
     images = add_background(
         color=images,
         opacity=opacities,
-        sensors=sensors,
+        rays=rays,
         backgrounds=[Background.WHITE for _ in range(len(images))],
         blur_background=False,
     )
@@ -979,7 +973,7 @@ def main():
             )
 
         # Render image
-        images, opacities, density_origin = render_images(
+        images, opacities, density_origin, rays = render_images(
             radiance_field,
             query_density=radiance_field.query_density,
             occupancy_grid=occupancy_grid,
@@ -996,7 +990,7 @@ def main():
         images, opacities = data_augment(
             images,
             opacities,
-            sensors=sensors,
+            rays=rays,
             random_resize_crop=True,
             resize_shape=text_image_discriminator.image_height_width,
             backgrounds=choices(
@@ -1116,7 +1110,7 @@ def main():
                     scene_origin=scene_origin,
                 )
                 sensors = tuple(elt.to(device) for elt in sensors)
-                images, opacities, _ = render_images(
+                images, opacities, _, rays = render_images(
                     radiance_field,
                     query_density=radiance_field.query_density,
                     # TODO @thomasw21: Check if I should actually feed the `occupancy_grid` or just rely on `query_density`
@@ -1134,7 +1128,7 @@ def main():
                 images, opacities = data_augment(
                     images,
                     opacities,
-                    sensors=sensors,
+                    rays=rays,
                     random_resize_crop=False,
                     resize_shape=text_image_discriminator.image_height_width,
                     backgrounds=None,
@@ -1177,7 +1171,7 @@ def main():
                 save_images(
                     images=images,
                     opacities=opacities,
-                    sensors=sensors,
+                    rays=rays,
                     path=args.save_images_path
                          / "validation"
                          / f"{it}-of-{args.iterations}"
@@ -1214,7 +1208,7 @@ def main():
             scene_origin=scene_origin,
         )
         sensors = tuple(elt.to(device) for elt in sensors)
-        images, opacities, _ = render_images(
+        images, opacities, _, rays= render_images(
             radiance_field,
             query_density=radiance_field.query_density,
             # TODO @thomasw21: Check if I should actually feed the `occupancy_grid` or just rely on `query_density`
@@ -1274,7 +1268,7 @@ def main():
         save_images(
             images=images,
             opacities=opacities,
-            sensors=sensors,
+            rays=rays,
             path=args.save_images_path / "final.jpg",
         )
 
