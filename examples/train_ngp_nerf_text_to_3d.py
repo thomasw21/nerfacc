@@ -850,16 +850,7 @@ def main():
         radiance_field.load_state_dict(
             torch.load(args.load_model_path, map_location=device)
         )
-
-    # Optimizer only on 3D object
-    # TODO @thomasw21: Determine if we run tcnn.optimizers
-    grad_scaler = torch.cuda.amp.GradScaler()
-
-    optimizer = torch.optim.AdamW(radiance_field.get_params(args.learning_rate))
-    # optimizer = torch.optim.Adam(radiance_field.get_params(args.learning_rate))
-    scheduler = torch.optim.lr_scheduler.LambdaLR(
-        optimizer, lambda iter: 0.1 ** min(iter / args.iterations, 1)
-    )
+    trainable_params = radiance_field.get_params(args.lr)
 
     # Image and text scorer
     if args.text_image_discriminator == "clip":
@@ -912,9 +903,23 @@ def main():
             # Background.RANDOM_TEXTURE: (1,None),
         }
     elif args.background == "learned_background":
-        training_backgrounds = {Background.LEARNED: (1, MLPBackground().to(device))}
+        background_model = MLPBackground().to(device)
+        training_backgrounds = {Background.LEARNED: (1, background_model)}
+        trainable_params += background_model.get_params(args.lr)
     else:
         raise ValueError(f"Invalid choice of background. Got {args.background}")
+
+    # Optimizer only on 3D object
+    # TODO @thomasw21: Determine if we run tcnn.optimizers
+    grad_scaler = torch.cuda.amp.GradScaler()
+
+    optimizer = torch.optim.AdamW(
+        trainable_params
+    )
+    # optimizer = torch.optim.Adam(trainable_params)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(
+        optimizer, lambda iter: 0.1 ** min(iter / args.iterations, 1)
+    )
 
     # training
     start_time = time.time()
