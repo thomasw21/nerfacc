@@ -29,6 +29,13 @@ class MLPBackground(nn.Module):
                 "degree": 4,
             },
         )
+        # self.encoder = tcnn.Encoding(
+        #     n_input_dims=in_dim,
+        #     encoding_config={
+        #         "otype": "Frequency",
+        #         "n_frequencies": 12
+        #     },
+        # )
 
         self.mlp_base = tcnn.Network(
             n_input_dims=self.encoder.n_output_dims,
@@ -43,6 +50,8 @@ class MLPBackground(nn.Module):
         )
 
     def forward(self, x: torch.Tensor):
+        # Spherical harmonics preprocessing
+        x = (x + 1.0) / 2.0
         return self.mlp_base(self.encoder(x))
 
     def get_params(self, lr: float):

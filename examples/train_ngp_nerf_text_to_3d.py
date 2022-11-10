@@ -913,9 +913,7 @@ def main():
     # TODO @thomasw21: Determine if we run tcnn.optimizers
     grad_scaler = torch.cuda.amp.GradScaler()
 
-    optimizer = torch.optim.AdamW(
-        trainable_params
-    )
+    optimizer = torch.optim.AdamW(trainable_params)
     # optimizer = torch.optim.Adam(trainable_params)
     scheduler = torch.optim.lr_scheduler.LambdaLR(
         optimizer, lambda iter: 0.1 ** min(iter / args.iterations, 1)
