@@ -762,7 +762,17 @@ def data_augment(
     blur_background: bool,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     N, H, W, _ = color.shape
-    # Do random crop
+
+    if backgrounds is not None:
+        color = add_background(
+            color=color,
+            opacity=opacity,
+            rays=rays,
+            backgrounds=backgrounds,
+            blur_background=blur_background,
+        )
+
+    # Do resizing/crop
     img = torch.cat([color.permute(3, 0, 1, 2), opacity.permute(3, 0, 1, 2)])
     if random_resize_crop:
         transforms = torchvision.transforms.Compose(
@@ -784,15 +794,6 @@ def data_augment(
     assert opacity.shape[-1] == 1
     color = img[:3].permute(1, 2, 3, 0)
     opacity = img[-1:].permute(1, 2, 3, 0)
-
-    if backgrounds is not None:
-        color = add_background(
-            color=color,
-            opacity=opacity,
-            rays=rays,
-            backgrounds=backgrounds,
-            blur_background=blur_background,
-        )
 
     return color, opacity
 
