@@ -724,9 +724,11 @@ def add_background(
             background_color = torch.zeros(1, 1, 1, device=color.device)
         elif enum is Background.LEARNED:
             _, view_dirs = rays
+            # Compute background only for subset of rays corresponding to a given image
+            view_dirs_chunk = view_dirs.view(N, -1, 3)[i]
             # value is assumed to be a MLPBackground
             assert isinstance(value, MLPBackground)
-            background_color = value(view_dirs)
+            background_color = value(view_dirs_chunk)
             assert background_color.shape[-1] == 3
             background_color = background_color.view(H, W, 3)
         else:
@@ -815,7 +817,7 @@ def save_images(path: Path, images: torch.Tensor, opacities: torch.Tensor, rays:
         color=images,
         opacity=opacities,
         rays=rays,
-        backgrounds=[Background.WHITE for _ in range(len(images))],
+        backgrounds=[(Background.WHITE, None) for _ in range(len(images))],
         blur_background=False,
     )
     save_image(
