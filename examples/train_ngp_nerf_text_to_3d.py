@@ -187,6 +187,12 @@ def get_args():
         ), "TODO @thomasw21: Figure out show to handle that grid resolution, with image resolution with rendering steps ..."
         args.grid_resolution = 128
 
+    # Dangerous, but that's the best thing to do, otherwise we should ask the user to remove it on their own
+    # TODO @thomasw21: Can we figure out a way not to delete the entire previous experience
+    if args.save_images_path.exists():
+        import shutil
+        shutil.rmtree(str(args.save_images_path.absolute()))
+
     args.save_model_path.parent.mkdir(parents=True, exist_ok=True)
     args.save_images_path.parent.mkdir(parents=True, exist_ok=True)
 
