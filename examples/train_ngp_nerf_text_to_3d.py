@@ -727,6 +727,8 @@ def add_background(
             # value is assumed to be a MLPBackground
             assert isinstance(value, MLPBackground)
             background_color = value(view_dirs)
+            assert background_color.shape[-1] == 3
+            background_color = background_color.view(H, W, 3)
         else:
             raise ValueError
 
@@ -907,7 +909,7 @@ def main():
             # Background.RANDOM_TEXTURE: (1,None),
         }
     elif args.background == "learned_background":
-        training_backgrounds = {Background.LEARNED: (1, MLPBackground())}
+        training_backgrounds = {Background.LEARNED: (1, MLPBackground().to(device))}
     else:
         raise ValueError(f"Invalid choice of background. Got {args.background}")
 
