@@ -1010,7 +1010,7 @@ def main():
                 ],
                 k=args.batch_size,
             ),
-            blur_background=True,
+            blur_background=args.background != "learned_background",
         )
 
         # Discriminate images with text
