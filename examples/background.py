@@ -56,6 +56,6 @@ class MLPBackground(nn.Module):
 
     def get_params(self, lr: float):
         return [
-            {"params": child.parameters(), "lr": lr * 10 if isinstance(child, tcnn.Encoding) else lr}
+            {"params": list(child.parameters()), "lr": lr * 10 if isinstance(child, tcnn.Encoding) else lr}
             for child in self.children()
         ]

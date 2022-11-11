@@ -157,10 +157,13 @@ def get_args():
     # Center loss, for all the sigmas to be close to 0
     parser.add_argument("--lambda-center-loss", type=float, default=0.0)
     parser.add_argument(
-        "--learning-rate", type=float, default=1e-2, help="Learning rate"
+        "--learning-rate", type=float, default=1e-3, help="Learning rate"
     )
     parser.add_argument(
-        "--iterations", type=int, default=2000, help="Number of optimizer steps"
+        "--learning-rate-warmup", type=int, default=3000, help="Learning rate warmup"
+    )
+    parser.add_argument(
+        "--iterations", type=int, default=10000, help="Number of optimizer steps"
     )
     parser.add_argument(
         "--batch-size",
@@ -186,6 +189,7 @@ def get_args():
             False
         ), "TODO @thomasw21: Figure out show to handle that grid resolution, with image resolution with rendering steps ..."
         args.grid_resolution = 128
+    assert args.iterations - args.learning_rate_warmup > 0
 
     # Dangerous, but that's the best thing to do, otherwise we should ask the user to remove it on their own
     # TODO @thomasw21: Can we figure out a way not to delete the entire previous experience
@@ -240,11 +244,11 @@ class ViewDependentPrompter:
 
 @torch.no_grad()
 def generate_random_views(
-        num_views: int,
-        device: torch.device,
-        theta_range: Tuple[float, float],
-        phi_range: Tuple[float, float],
-        stochastic_views: bool = True,
+    num_views: int,
+    device: torch.device,
+    theta_range: Tuple[float, float],
+    phi_range: Tuple[float, float],
+    stochastic_views: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     # TODO @thomasw21: Interestingly this doesn't sample uniformily around the cirle (typically upsample regions around the poles)
     #  - To sample around the circle you need use normalized gaussian but otherwise I need to figure things out.
@@ -550,7 +554,7 @@ def render_images(
     )  # [N, H, W, 3]
     # pixel_position_in_world = directions + C[:, None, None, :]
     view_dirs = (
-            directions / torch.linalg.norm(directions, dim=-1)[..., None]
+        directions / torch.linalg.norm(directions, dim=-1)[..., None]
     ).view(
         -1, 3
     )  # [N * image_height * image_width, 3]
@@ -731,6 +735,7 @@ def add_background(
         elif enum is Background.LEARNED:
             _, view_dirs = rays
             # Compute background only for subset of rays corresponding to a given image
+            # TODO @thomasw21: all rays are not pointing to 0 so this is terribly wrong
             view_dirs_chunk = view_dirs.view(N, -1, 3)[i]
             # value is assumed to be a MLPBackground
             assert isinstance(value, MLPBackground)
@@ -910,6 +915,7 @@ def main():
         }
     elif args.background == "learned_background":
         background_model = MLPBackground().to(device)
+        background_model.train()
         training_backgrounds = {Background.LEARNED: (1, background_model)}
         trainable_params += background_model.get_params(args.learning_rate)
     else:
@@ -921,9 +927,21 @@ def main():
 
     optimizer = torch.optim.AdamW(trainable_params)
     # optimizer = torch.optim.Adam(trainable_params)
+    def lambda_lr_from_iter(iter):
+        if iter < args.learning_rate_warmup:
+            # Linear warmup from 1e-5 to args.learning_rate
+            t = iter / args.learning_rate_warmup
+            return 1e-5 / args.learning_rate * (1 - t) + t
+        else:
+            # Exponential decay from args.learning_rate to 0.1 * args.learning_rate
+            return 0.1 ** min((iter - args.learning_rate_warmup) / (args.iterations - args.learning_rate_warmup), 1)
+    # TODO @thomasw21: Add warmup.
     scheduler = torch.optim.lr_scheduler.LambdaLR(
-        optimizer, lambda iter: 0.1 ** min(iter / args.iterations, 1)
+        optimizer, lambda_lr_from_iter
     )
+    # scheduler = torch.optim.lr_scheduler.LambdaLR(
+    #     optimizer, lambda iter: 0.1 ** min(iter / args.iterations, 1)
+    # )
 
     # training
     start_time = time.time()
