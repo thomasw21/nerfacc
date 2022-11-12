@@ -40,8 +40,8 @@ class SDTextImageDiscriminator(TextImageDiscriminator):
         self.guidance_scale = 100
 
     def forward(self, encoded_images: torch.Tensor, encoded_texts: torch.Tensor) -> torch.Tensor:
+        batch_size, C, H, W = encoded_images.shape
         with torch.no_grad():
-            batch_size = encoded_images.shape[0]
 
             # TODO @thomasw21: understand this
             t = torch.randint(self.min_step, self.max_step + 1, [batch_size], dtype=torch.long, device=self.device) # timestep
@@ -81,12 +81,13 @@ class SDTextImageDiscriminator(TextImageDiscriminator):
                 (noise_pred - noise).view(batch_size, 1, -1),
                 encoded_images.view(batch_size, -1, 1)
             ).squeeze(2).squeeze(1)
-        )
+        ) / (C * H * W) # [B,]
         # loss = torch.sum(torch.mean(w * (noise_pred - noise) * encoded_images, dim=0))
 
         return loss
 
     def encode_texts(self, texts: List[str]) -> torch.Tensor:
+        assert len(texts) == 1, "TODO @thomasw21: Current implementation relies on the fact that we feed text one by one"
         # We add negative text_encodings with empty strings ""
         negative_texts = [""] * len(texts)
 
