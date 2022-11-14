@@ -76,12 +76,12 @@ class SDTextImageDiscriminator(TextImageDiscriminator):
 
         # Compute loss as sum over every pixel and mean over batch size
         # Batch dot product
-        loss = w * (
+        loss = (w / (C * H * W)) * (
             torch.bmm(
                 (noise_pred - noise).view(batch_size, 1, -1),
                 encoded_images.view(batch_size, -1, 1)
             ).squeeze(2).squeeze(1)
-        ) / (C * H * W) # [B,]
+        ) # [B,]
         # loss = torch.sum(torch.mean(w * (noise_pred - noise) * encoded_images, dim=0))
 
         return loss
