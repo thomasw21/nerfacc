@@ -70,7 +70,7 @@ torch::Tensor contract(
     CHECK_INPUT(samples);
 
     const int n_samples = samples.size(0);
-    const int threads = 256;
+    const int threads = 1024;
     const int blocks = CUDA_N_BLOCKS_NEEDED(n_samples, threads);
 
     torch::Tensor out_samples = torch::empty({n_samples, 3}, samples.options());
@@ -96,7 +96,7 @@ torch::Tensor contract_inv(
     CHECK_INPUT(samples);
 
     const int n_samples = samples.size(0);
-    const int threads = 256;
+    const int threads = 1024;
     const int blocks = CUDA_N_BLOCKS_NEEDED(n_samples, threads);
 
     torch::Tensor out_samples = torch::empty({n_samples, 3}, samples.options());

@@ -87,7 +87,7 @@ torch::Tensor unpack_info(const torch::Tensor packed_info, const int n_samples)
     CHECK_INPUT(packed_info);
 
     const int n_rays = packed_info.size(0);
-    const int threads = 256;
+    const int threads = 1024;
     const int blocks = CUDA_N_BLOCKS_NEEDED(n_rays, threads);
 
     // int n_samples = packed_info[n_rays - 1].sum(0).item<int>();
@@ -109,7 +109,7 @@ torch::Tensor unpack_info_to_mask(
     CHECK_INPUT(packed_info);
 
     const int n_rays = packed_info.size(0);
-    const int threads = 256;
+    const int threads = 1024;
     const int blocks = CUDA_N_BLOCKS_NEEDED(n_rays, threads);
 
     torch::Tensor masks = torch::zeros(
@@ -140,7 +140,7 @@ torch::Tensor unpack_data(
     const int n_samples = data.size(0);
     const int data_dim = data.size(1);
 
-    const int threads = 256;
+    const int threads = 1024;
     const int blocks = CUDA_N_BLOCKS_NEEDED(n_rays, threads);
 
     torch::Tensor unpacked_data = torch::zeros(

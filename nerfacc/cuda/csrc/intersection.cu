@@ -113,7 +113,7 @@ std::vector<torch::Tensor> ray_aabb_intersect(
 
     const int N = rays_o.size(0);
 
-    const int threads = 256;
+    const int threads = 1024;
     const int blocks = CUDA_N_BLOCKS_NEEDED(N, threads);
 
     torch::Tensor t_min = torch::empty({N}, rays_o.options());

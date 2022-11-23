@@ -222,7 +222,7 @@ std::vector<torch::Tensor> ray_marching(
     const int3 grid_res = make_int3(
         grid_binary.size(0), grid_binary.size(1), grid_binary.size(2));
 
-    const int threads = 256;
+    const int threads = 1024;
     const int blocks = CUDA_N_BLOCKS_NEEDED(n_rays, threads);
 
     // helper counter
@@ -331,7 +331,7 @@ torch::Tensor grid_query(
     const int3 grid_res = make_int3(
         grid_value.size(0), grid_value.size(1), grid_value.size(2));
 
-    const int threads = 256;
+    const int threads = 1024;
     const int blocks = CUDA_N_BLOCKS_NEEDED(n_samples, threads);
 
     torch::Tensor occs = torch::empty({n_samples}, grid_value.options());

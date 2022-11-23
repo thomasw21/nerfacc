@@ -170,7 +170,7 @@ std::vector<torch::Tensor> ray_resampling(
     const uint32_t n_rays = packed_info.size(0);
     const uint32_t n_samples = weights.size(0);
 
-    const int threads = 256;
+    const int threads = 1024;
     const int blocks = CUDA_N_BLOCKS_NEEDED(n_rays, threads);
 
     torch::Tensor num_steps = torch::split(packed_info, 1, 1)[1];
